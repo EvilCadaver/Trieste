@@ -3,11 +3,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
-filename = ".\Data\Scan_031_323719586.h5"
 dataset_path = "/CCD/Image"
 
-with h5py.File(filename, "r") as h5:
-    image = h5[dataset_path][...]
+scanname = ".\Data\FeRh_A04\Scan_061\\rawdata\Scan_061_326273873.h5"
+BGname = ".\Data\FeRh_A04\Scan_061_NoProbe\\rawdata\Scan_061_NoProbe_326262948.h5"
+
+with h5py.File(scanname, "r") as h5:
+    image_scan = h5[dataset_path][...]
+
+with h5py.File(BGname, "r") as h5:
+    image_BG = h5[dataset_path][...]
+
+image = image_scan - image_BG
 
 print(type(image))
 print(image.shape)
