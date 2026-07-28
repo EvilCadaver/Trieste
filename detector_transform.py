@@ -15,33 +15,50 @@ dataset_path = "/CCD/Image"
 
 with h5py.File(fileScan, "r") as h5:
     imageScan = h5[dataset_path][...]
-    imageScan = np.rot90(imageScan, 2)
+    imageScan = np.rot90(imageScan.T, 2)
 
 with h5py.File(fileDark, "r") as h5:
     imageDark = h5[dataset_path][...]
-    imageDark = np.rot90(imageDark, 2)
+    imageDark = np.rot90(imageDark.T, 2)
 
 with h5py.File(fileNP, "r") as h5:
-    imageNP = h5[dataset_path][...]
-    imageNP = np.rot90(imageNP, 2)
+    imageNoProbe = h5[dataset_path][...]
+    imageNoProbe = np.rot90(imageNoProbe.T, 2)
 
 with h5py.File(fileOP, "r") as h5:
-    imageOP = h5[dataset_path][...]
-    imageOP = np.rot90(imageOP, 2)
+    imageOnlyProbe = h5[dataset_path][...]
+    imageOnlyProbe = np.rot90(imageOnlyProbe.T, 2)
 
-roiBG = np.s_[400:440, 100:150] # ROI of the background assumption
+roiBG = np.s_[400:440, 160:210] # ROI of the background assumption
 
-## Normalisation factors to imageScan for backgrounds
-normDark = np.sum(imageScan[roiBG])/np.sum(imageDark[roiBG])
+maskBeamStop = np.ones_like(imageScan, dtype=bool)
+maskBeamStop[379:647,0:222] = False
+maskBeamStop[511:1024,29:120] = False
+maskBeamStop[roiBG] = True
 
-DESImg = imageScan - normNp * imageNP
+plt.imshow(imageScan[roiBG], origin="upper", interpolation="none")
+plt.xlabel("x / column")
+plt.ylabel("y / row")
+plt.show()
 
-# normNP = np.sum(imageScan[roiBG])/np.sum(imageNP[roiBG])
-# normOP = np.sum(imageScan[roiBG])/np.sum(imageOP[roiBG])
+normNoProbe = np.sum(imageScan[roiBG])/np.sum(imageNoProbe[roiBG])
 
-levelBG = np.median(DESImg[roiBG])
+DESImg = (imageScan - normNoProbe * imageNoProbe)
+print("DESImg data type",DESImg.dtype)
 
-image = DESImg.astype(np.float64) - levelBG
+normDark = np.sum(imageOnlyProbe[roiBG])/np.sum(imageDark[roiBG])
+
+DESImgUP = (imageOnlyProbe - normDark * imageDark)
+print("DESImgUP data type",DESImgUP.dtype)
+
+normScan = np.sum(imageScan * maskBeamStop)
+normNoProbe = np.sum(imageOnlyProbe * maskBeamStop)
+
+image = (DESImg/normScan - DESImgUP/normNoProbe) * maskBeamStop
+
+levelBG = np.median(image[roiBG])
+
+image = image.astype(np.float64) - levelBG
 
 print(type(image))
 print(image.shape)
@@ -51,9 +68,9 @@ print(np.min(image), np.max(image))
 plt.figure()
 
 plt.imshow(
-    image.T,
+    image,
     origin="upper",
-    cmap="gray",
+    cmap="RdBu",
     # norm=LogNorm(
     #     vmin=max(1, np.nanpercentile(image, 1)),
     #     vmax=np.nanpercentile(image, 99.9),
