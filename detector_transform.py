@@ -1,14 +1,17 @@
 import h5py
+from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 
-dataset_path = "/CCD/Image"
+data_folder = Path(r"C:/git/Trieste/Data/FeRh_A04")
 
-fileScan = ".\Data\FeRh_A04\Scan_061\\rawdata\Scan_061_326273873.h5"
-fileDark = ".\Data\FeRh_A04\Scan_061_NoProbe\\rawdata\Scan_061_NoProbe_326262948.h5"
-fileNP = ".\Data\FeRh_A04\Scan_061_NoProbe\\rawdata\Scan_061_NoProbe_326262948.h5"
-fileOP = ".\Data\FeRh_A04\Scan_061_OnlyProbe\\rawdata\Scan_061_OnlyProbe_326264983.h5"
+fileScan = (data_folder / "Scan_061" / "rawdata" / "Scan_061_326273873.h5")
+fileDark = (data_folder / "Scan_061_NoProbe" / "rawdata" / "Scan_061_NoProbe_326262948.h5")
+fileNP = (data_folder / "Scan_061_NoProbe" / "rawdata" / "Scan_061_NoProbe_326262948.h5")
+fileOP = (data_folder / "Scan_061_OnlyProbe" / "rawdata" / "Scan_061_OnlyProbe_326264983.h5")
+
+dataset_path = "/CCD/Image"
 
 with h5py.File(fileScan, "r") as h5:
     imageScan = h5[dataset_path][...]
@@ -22,10 +25,11 @@ with h5py.File(fileNP, "r") as h5:
 with h5py.File(fileOP, "r") as h5:
     imageOP = h5[dataset_path][...]
 
+roiBG = np.s_[400:440, 100:150]
+
 image = imageScan - imageDark - imageNP - imageOP
 
-areaBG = image[400:440,100:150]
-
+areaBG = image[roiBG]
 levelBG = np.median(image)
 
 image = image.astype(np.float64) - levelBG
