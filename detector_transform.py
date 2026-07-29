@@ -97,36 +97,122 @@ plt.show()
 
 height, width = image.shape
 
-column_edges = np.arange(width + 1) - 0.5
-row_edges = np.arange(height + 1) - 0.5
+columns, rows = np.meshgrid(
+    np.arange(width), 
+    np.arange(height),
+)
 
-# Calculate each pixel corner in 3D:
-columns, rows = np.meshgrid(column_edges, row_edges)
+# Coordinates in the untilted detector plane
+x0 = (columns - CX1) * SizePixel
+y0 = (rows - CY1) * SizePixel
 
-u = (columns - CX1) * SizePixel
-v = (rows - CY1) * SizePixel
+# Detector rotation around its column direction
+x = x0 * np.cos(CHI)
+y = y0
+z = RCCD - x0 * np.sin(CHI)
 
-# Detector tilted around its vertical axis
-x = u * np.cos(CHI)
-y = v 
-z = RCCD - u * np.sin(CHI)
+# Unit vector toward every detector pixel
+ray_length = np.sqrt(x**2 + y**2 + z**2)
 
-# horizontal and vertical observed angles
-angle_x = np.arctan2(x, z)
+sf_x = x / ray_length
+sf_y = y / ray_length
+sf_z = z / ray_length
 
-# Elevation relative to the reflected-beam direction
-angle_y = np.arctan2(y, z)
+# Here x* is along the surface and y* is the outward sample normal:
 
-angle_x_deg = np.degrees(angle_x)
-angle_y_deg = np.degrees(angle_y)
+sin_omega = np.sin(OMEGA)
+cos_omega = np.cos(OMEGA)
 
-# Plot directly on the nonuniform angular grid:
+# Sample basis expressed in detector/laboratory coordinates
+e_xstar = np.array([sin_omega, 0.0, -cos_omega])
+e_ystar = np.array([ 0.0, -1.0, 0.0])
+e_zstar = np.array([cos_omega, 0.0, sin_omega])
+
+# Incident-beam unit vector in laboratory coordinates
+si = (-cos_omega * e_xstar - sin_omega * e_zstar)
+
+# Scattering vector
+
+k = 2 * np.pi / Lambda
+
+qx_lab = k * (sf_x - si[0])
+qy_lab = k * (sf_y - si[1])
+qz_lab = k * (sf_z - si[2])
+
+# Project into the sample reciprocal basis
+qx_star = (
+    qx_lab * e_xstar[0]
+    + qy_lab * e_xstar[1]
+    + qz_lab * e_xstar[2]
+)
+
+qy_star = (
+    qx_lab * e_ystar[0]
+    + qy_lab * e_ystar[1]
+    + qz_lab * e_ystar[2]
+)
+
+# Convert m^-1 to nm^-1
+qx_star *= 1e-9
+qy_star *= 1e-9
+
+# The first value should be approximately zero and the second approximately expected_qy.
+# print(qx_star[int(CY1), int(CX1)])
+# print(qy_star[int(CY1), int(CX1)])
+
+# expected_qy = 2 * k * np.sin(OMEGA) * 1e-9
+# print("Expected specular Qy*:", expected_qy)
+
+# Rebinning
+valid = maskBeamStop & np.isfinite(image)
+
+qx_values = qx_star[valid]
+qy_values = qy_star[valid]
+intensity_values = image[valid]
+
+qx_min, qx_max = qx_values.min(), qx_values.max()
+qy_min, qy_max = qy_values.min(), qy_values.max()
+
+qx_span = qx_max - qx_min
+qy_span = qy_max - qy_min
+
+# At most approximately 600 bins along the larger dimension
+dq = max(qx_span, qy_span) / 600
+
+nx = int(np.ceil(qx_span / dq))
+ny = int(np.ceil(qy_span / dq))
+
+qx_edges = qx_min + np.arange(nx + 1) * dq
+qy_edges = qy_min + np.arange(ny + 1) * dq
+
+intensity_sum, _, _ = np.histogram2d(
+    qx_values,
+    qy_values,
+    bins=(qx_edges, qy_edges),
+    weights=intensity_values,
+)
+
+sample_count, _, _ = np.histogram2d(
+    qx_values,
+    qy_values,
+    bins=(qx_edges, qy_edges),
+)
+
+rebinned = np.divide(
+    intensity_sum,
+    sample_count,
+    out=np.full_like(intensity_sum, np.nan),
+    where=sample_count > 0,
+)
+
+# Plotting
+
 fig, ax = plt.subplots()
 
 mesh = ax.pcolormesh(
-    angle_x_deg,
-    angle_y_deg,
-    image,
+    qx_edges,
+    qy_edges,
+    rebinned.T,
     shading="flat",
     cmap="RdBu",
     vmin=vmin,
@@ -134,8 +220,8 @@ mesh = ax.pcolormesh(
 )
 
 ax.set_aspect("equal", adjustable="box")
-ax.invert_yaxis()
-ax.set_xlabel(r"$\theta_x$ (degrees)")
-ax.set_ylabel(r"$\theta_y$ (degrees)")
-fig.colorbar(mesh, ax=ax, label="Intensity")
+ax.set_xlabel(r"$Q_x^*$ (nm$^{-1}$)")
+ax.set_ylabel(r"$Q_y^*$ (nm$^{-1}$)")
+fig.colorbar(mesh, ax=ax, label="Mean intensity")
+
 plt.show()
