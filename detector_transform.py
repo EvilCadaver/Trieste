@@ -53,21 +53,36 @@ maskBeamStop[511:1024,29:120] = False
 normNoProbe = np.sum(imageScan[roiBG])/np.sum(imageNoProbe[roiBG])
 
 DESImg = (imageScan - normNoProbe * imageNoProbe)
-print("DESImg data type",DESImg.dtype)
+# print("DESImg data type",DESImg.dtype)
+
+# plt.figure()
+
+# plt.imshow(
+#     DESImg,
+#     origin= "upper",
+#     cmap= "RdBu",
+#     # norm=TwoSlopeNorm(vmin=-limit, vcenter=0, vmax=limit)
+#     vmin= 0.1 * DESImg.min(),
+#     vmax= 0.1 * DESImg.max(),
+# )
+
+# plt.xlabel("Detector column")
+# plt.ylabel("Detector row")
+# plt.colorbar(label="Intensity")
+# plt.show()
 
 normDark = np.sum(imageOnlyProbe[roiBG])/np.sum(imageDark[roiBG])
 
 DESImgUP = (imageOnlyProbe - normDark * imageDark)
-print("DESImgUP data type",DESImgUP.dtype)
+# print("DESImgUP data type",DESImgUP.dtype)
 
 normScan = np.sum(DESImg * maskBeamStop)
 normNoProbe = np.sum(DESImgUP * maskBeamStop)
 
 image = (DESImg/normScan - DESImgUP/normNoProbe) * maskBeamStop
 
-levelBG = np.median(image[roiBG])
-
-image = image.astype(np.float64) - levelBG
+# levelBG = np.median(image[roiBG])
+# image = image.astype(np.float64) - levelBG
 
 valid = image[maskBeamStop & np.isfinite(image)]
 # limit = np.percentile(np.abs(valid),90)
@@ -79,7 +94,7 @@ vmax = 0.1 * valid.max()
 # print(image.dtype)
 # print(np.min(image), np.max(image))
 
-plt.figure()
+plt.figure(1)
 
 plt.imshow(
     image,
@@ -93,7 +108,7 @@ plt.imshow(
 plt.xlabel("Detector column")
 plt.ylabel("Detector row")
 plt.colorbar(label="Intensity")
-plt.show()
+plt.show(block=False)
 
 height, width = image.shape
 
@@ -207,8 +222,8 @@ qy_min, qy_max = qy_values.min(), qy_values.max()
 qx_span = qx_max - qx_min
 qy_span = qy_max - qy_min
 
-# At most approximately 600 bins along the larger dimension
-dq = max(qx_span, qy_span) / 600
+# At most approximately N bins along the larger dimension
+dq = max(qx_span, qy_span) / 512
 
 nx = int(np.ceil(qx_span / dq))
 ny = int(np.ceil(qy_span / dq))
@@ -240,19 +255,40 @@ rebinned = np.divide(
 
 fig, ax = plt.subplots()
 
-mesh = ax.pcolormesh(
-    qx_edges,
-    qy_edges,
+# mesh = ax.pcolormesh(
+#     qx_edges,
+#     qy_edges,
+#     rebinned.T,
+#     shading="flat",
+#     cmap="seismic",
+#     vmin=vmin,
+#     vmax=vmax,
+# )
+
+finite_values = rebinned[np.isfinite(rebinned)]
+
+vmax = 0.2 * finite_values.max()
+vmin = 0.2 * finite_values.min()
+
+plot_image = ax.imshow(
     rebinned.T,
-    shading="flat",
+    origin="lower",
+    extent=[
+        qx_edges[0],
+        qx_edges[-1],
+        qy_edges[0],
+        qy_edges[-1],
+    ],
+    interpolation="none",
     cmap="RdBu",
     vmin=vmin,
     vmax=vmax,
+    aspect="equal",
 )
 
 ax.set_aspect("equal", adjustable="box")
 ax.set_xlabel(r"$Q_x^*$ (nm$^{-1}$)")
 ax.set_ylabel(r"$Q_y^*$ (nm$^{-1}$)")
-fig.colorbar(mesh, ax=ax, label="Mean intensity")
+fig.colorbar(plot_image, ax=ax, label="Mean intensity")
 
 plt.show()
