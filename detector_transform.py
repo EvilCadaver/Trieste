@@ -140,17 +140,9 @@ qy_lab = k * (sf_y - si[1])
 qz_lab = k * (sf_z - si[2])
 
 # Project into the sample reciprocal basis
-qx_star = (
-    qx_lab * e_xstar[0]
-    + qy_lab * e_xstar[1]
-    + qz_lab * e_xstar[2]
-)
+qx_star = (qx_lab * e_xstar[0] + qy_lab * e_xstar[1] + qz_lab * e_xstar[2])
 
-qy_star = (
-    qx_lab * e_ystar[0]
-    + qy_lab * e_ystar[1]
-    + qz_lab * e_ystar[2]
-)
+qy_star = (qx_lab * e_ystar[0] + qy_lab * e_ystar[1] + qz_lab * e_ystar[2])
 
 # Convert m^-1 to nm^-1
 qx_star *= 1e-9
