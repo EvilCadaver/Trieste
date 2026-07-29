@@ -36,7 +36,7 @@ CY1 = 1024/NBinn - 1            #Reflection centre Y, pixels
 CX1 = 100/NBinn - 1             #Reflection centre X, pixels
 RCCD = 67e-3                    #Distance to detector's CY1, CX1, m
 OMEGA = 16.5 /180*np.pi         #Incidence beam angle, rad
-CHI = 45 /180*np.pi             #Detector angle, rad
+CHI = -45 /180*np.pi             #Detector angle, rad
 
 roiBG = np.s_[400:440, 160:210] # ROI of the background assumption
 
@@ -106,16 +106,16 @@ columns, rows = np.meshgrid(column_edges, row_edges)
 u = (columns - CX1) * SizePixel
 v = (rows - CY1) * SizePixel
 
-# Detector tilted around its column/horizontal axis
-x = u
-y = v * np.cos(CHI)
-z = RCCD - v * np.sin(CHI)
+# Detector tilted around its vertical axis
+x = u * np.cos(CHI)
+y = v 
+z = RCCD - u * np.sin(CHI)
 
 # horizontal and vertical observed angles
 angle_x = np.arctan2(x, z)
 
 # Elevation relative to the reflected-beam direction
-angle_y = np.arctan2(y, np.sqrt(x**2 + z**2))
+angle_y = np.arctan2(y, z)
 
 angle_x_deg = np.degrees(angle_x)
 angle_y_deg = np.degrees(angle_y)
@@ -133,6 +133,7 @@ mesh = ax.pcolormesh(
     vmax=vmax,
 )
 
+ax.set_aspect("equal", adjustable="box")
 ax.invert_yaxis()
 ax.set_xlabel(r"$\theta_x$ (degrees)")
 ax.set_ylabel(r"$\theta_y$ (degrees)")
