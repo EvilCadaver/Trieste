@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm, TwoSlopeNorm
 
-data_folder = Path(r"C:/git/Trieste/Data/FeRh_A04")
+data_folder = Path(r"C:/git/Trieste/Data/FeRh_A04") # Windows interprets / same as \, and the first one avoids the ecaped characters.
 
 fileScan = (data_folder / "Scan_061" / "rawdata" / "Scan_061_326273873.h5")
 fileDark = (data_folder / "Scan_061_Dark" / "rawdata" / "Scan_061_Dark_326266957.h5")
