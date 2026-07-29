@@ -33,10 +33,10 @@ NBinn = 2
 SizePixel = NBinn * 13.5e-6     #Pixel edge length, m
 Lambda = 23.5e-9                #Wavelength, m
 CY1 = 1024/NBinn - 1            #Reflection centre Y, pixels
-CX1 = 100/NBinn - 1             #Reflection centre X, pixels
+CX1 = 150/NBinn - 1             #Reflection centre X, pixels
 RCCD = 67e-3                    #Distance to detector's CY1, CX1, m
-OMEGA = 16.5 /180*np.pi         #Incidence beam angle, rad
-CHI = -45 /180*np.pi             #Detector angle, rad
+OMEGA = 33 /180*np.pi         #Incidence beam angle, rad
+CHI = 45 /180*np.pi             #Detector angle, rad
 
 roiBG = np.s_[400:440, 160:210] # ROI of the background assumption
 
@@ -162,6 +162,45 @@ qy_star *= 1e-9
 
 # expected_qy = 2 * k * np.sin(OMEGA) * 1e-9
 # print("Expected specular Qy*:", expected_qy)
+
+# #Intensity correction
+
+# pixel_area = SizePixel**2
+
+# # Detector normal for the current CHI convention
+# detector_normal = np.array([
+#     np.sin(CHI),
+#     0.0,
+#     np.cos(CHI),
+# ])
+
+# cos_incidence = np.abs(
+#     detector_normal[0] * sf_x
+#     + detector_normal[1] * sf_y
+#     + detector_normal[2] * sf_z
+# )
+
+# solid_angle = (
+#     pixel_area
+#     * cos_incidence
+#     / ray_length**2
+# )
+
+# cy = int(round(CY1))
+# cx = int(round(CX1))
+
+# solid_angle_center = solid_angle[cy, cx]
+
+# geometry_correction = np.divide(
+#     solid_angle_center,
+#     solid_angle,
+#     out=np.full_like(solid_angle, np.nan),
+#     where=solid_angle > 0,
+# )
+
+# image_corrected = image * geometry_correction
+
+# image = image_corrected
 
 # Rebinning
 valid = maskBeamStop & np.isfinite(image)
