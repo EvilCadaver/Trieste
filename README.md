@@ -204,6 +204,13 @@ with h5py.File(scanFilePath, "r") as h5:
 - `detector_transform.py` — detector-image correction and reciprocal-space
   transformation work.
 
+## AI-assisted development
+
+This project was developed with assistance from OpenAI Codex. The tool was
+used for code generation, refactoring, documentation, and debugging. All
+AI-assisted changes were reviewed and tested by the project maintainer, who
+remains responsible for the final implementation.
+
 ## Licence
 
 This project is licensed under **EUPL-1.2-or-later**. See `LICENSE` for the
