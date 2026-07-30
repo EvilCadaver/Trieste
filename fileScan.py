@@ -1,282 +1,313 @@
-import h5py
 from pathlib import Path
 import re
-import numpy as np
 from statistics import median
 
-# This script discovers one numbered acquisition and associates each normal
-# data file with the background set acquired after the first file in its
-# block. Acquisition order is determined from the numeric bunch ID at the
-# end of every filename, rather than from directory or filesystem order.
 
-# Root containing one directory per sample.
-folderData = Path(r"C:/git/Trieste/Data")
+def scanFiles(
+    folderData,
+    sampleName,
+    scanNames,
+    scanNo,
+    verbose=False,
+    minimumFileSizeRatio=0.95,
+):
+    """Find one scan and associate its usable data with background triplets.
 
-# Acquisition naming convention:
-#   scanNames[0]  -> common folder/file prefix
-#   scanNames[1]  -> normal data (an empty suffix)
-#   scanNames[2:] -> the background acquisition types
-sampleName = "FeRh_A04"
+    Parameters
+    ----------
+    folderData : str or Path
+        Root directory containing the sample directories.
+    sampleName : str
+        Name of the sample directory.
+    scanNames : sequence of str
+        Naming components in the form
+        [commonPrefix, "", backgroundType1, backgroundType2, ...].
+    scanNo : int
+        Scan number. Any amount of leading zero padding is accepted on disk.
+    verbose : bool, optional
+        Print detailed file assignments and diagnostics.
+    minimumFileSizeRatio : float, optional
+        Files smaller than this fraction of the median size are rejected.
 
-scanNames = ["Scan", "", "NoProbe", "OnlyProbe", "Dark"]
+    Returns
+    -------
+    dict
+        File lists, valid/invalid groups, per-file background assignments,
+        broken-file diagnostics, and the reference file size.
+    """
+    folderData = Path(folderData)
 
-# Leading zeroes in the on-disk scan number are accepted, so scanNo=61
-# matches names containing both "61" and "061".
-scanNo = 68
+    if len(scanNames) < 3 or scanNames[1] != "":
+        raise ValueError(
+            "scanNames must be [commonPrefix, '', backgroundType1, ...]"
+        )
+    if not 0 < minimumFileSizeRatio <= 1:
+        raise ValueError("minimumFileSizeRatio must be greater than 0 and at most 1")
 
-# Enable the detailed data-to-background mapping printed at the end.
-verbose = True
+    folderSample = folderData / sampleName
+    if not folderSample.is_dir():
+        raise FileNotFoundError(f"Sample directory does not exist: {folderSample}")
 
-# A file is considered broken when it is more than 5% smaller than the median
-# file size for this acquisition. The median represents the majority well and
-# is not strongly affected by a small number of incomplete files.
-minimumFileSizeRatio = 0.95
+    commonName = re.escape(scanNames[0])
 
-folderSample = folderData / sampleName
+    # Converting through int removes any padding supplied by the caller. The
+    # regular expressions add 0* in front of this value, so scanNo=68 matches
+    # both Scan_68 and Scan_00068, but does not match Scan_680.
+    number = str(int(scanNo))
+    backgroundNames = list(scanNames[2:])
 
-name0 = re.escape(scanNames[0])
-number = str(int(scanNo))
+    # ------------------------------------------------------------------
+    # Stage 1: locate every file belonging to the requested scan number.
+    # ------------------------------------------------------------------
+    # Each record is (firstBunchId, scanType, path). The bunch ID at the end
+    # of each filename provides the true acquisition order across directories.
+    fileRecords = []
+    filesByScanName = {scanName: [] for scanName in scanNames[1:]}
 
-# General scan-folder expression retained as a description of the naming
-# convention. A more specific expression is built for each scan type below.
-folderRegex = re.compile(
-    rf"{name0}_.*?(?<!\d)0*{number}"
-)
+    for scanName in scanNames[1:]:
+        # The empty scan name represents normal data. It deliberately produces
+        # no suffix and no extra underscore:
+        #   normal:     Scan_068
+        #   background: Scan_068_NoProbe
+        scanSuffix = f"_{re.escape(scanName)}" if scanName else ""
 
-# A usable background set is complete only after all these types are found.
-backgroundNames = scanNames[2:]
+        # fullmatch() is used below, so only the complete expected folder or
+        # filename is accepted. This prevents scanNo=68 from selecting 680.
+        folderRegex = re.compile(rf"{commonName}_0*{number}{scanSuffix}")
+        filenameRegex = re.compile(
+            rf"{commonName}_0*{number}{scanSuffix}_"
+            rf"(?P<bunchId>\d+)\.h5"
+        )
 
-# Each record has the form (firstBunchId, scanType, path). Keeping all scan
-# types in one list allows them to be merged into their true acquisition order.
-fileRecords = []
-
-# This additional index keeps the files separated by type for later analysis,
-# e.g. filesByScanName["Dark"] or filesByScanName[""].
-filesByScanName = {
-    scanName: [] for scanName in scanNames[1:]
-}
-
-# Find files for only the selected scanNo.
-for scanName in scanNames[1:]:
-    # Normal data has no suffix ("Scan_061"); background types do
-    # (for example, "Scan_061_NoProbe").
-    scanSuffix = f"_{re.escape(scanName)}" if scanName else ""
-
-    # fullmatch() makes sure scanNo=61 does not accidentally select scan 610.
-    folderRegex = re.compile(
-        rf"{name0}_0*{number}{scanSuffix}"
-    )
-
-    # The final numeric field is the first bunch ID stored in the HDF5 file.
-    # It is captured so files from all four directories can be sorted together.
-    filenameRegex = re.compile(
-        rf"{name0}_0*{number}{scanSuffix}_"
-        rf"(?P<bunchId>\d+)\.h5"
-    )
-
-    for scanFolder in folderSample.iterdir():
-        if not scanFolder.is_dir():
-            continue
-
-        if not folderRegex.fullmatch(scanFolder.name):
-            continue
-
-        # Only HDF5 files directly inside the acquisition's rawdata directory
-        # belong to this stream.
-        folderRawdata = scanFolder / "rawdata"
-
-        if not folderRawdata.is_dir():
-            continue
-
-        for file in folderRawdata.glob("*.h5"):
-            match = filenameRegex.fullmatch(file.name)
-
-            if match is None:
+        # Search only immediate acquisition folders inside the sample folder.
+        # Other sample directories and unrelated nested folders are ignored.
+        for scanFolder in folderSample.iterdir():
+            if not scanFolder.is_dir() or not folderRegex.fullmatch(scanFolder.name):
                 continue
 
-            # Integer comparison is required: lexicographic filename sorting
-            # would not reliably represent bunch order for different lengths.
-            bunchId = int(match.group("bunchId"))
+            # Acquisition HDF5 files are expected directly in rawdata. Using
+            # glob rather than rglob prevents accidental inclusion of backups
+            # or processed files stored in deeper subdirectories.
+            folderRawdata = scanFolder / "rawdata"
+            if not folderRawdata.is_dir():
+                continue
 
-            fileRecords.append((bunchId, scanName, file))
-            filesByScanName[scanName].append(file)
+            for file in folderRawdata.glob("*.h5"):
+                match = filenameRegex.fullmatch(file.name)
+                if match is None:
+                    continue
 
-# Determine the typical size using all normal and background files belonging
-# to this scan number. Their expected sizes differ by less than 1%, while an
-# acquisition interrupted by a FEL failure should be a much smaller outlier.
-fileSizes = {
-    file: file.stat().st_size
-    for bunchId, scanName, file in fileRecords
-}
+                bunchId = int(match.group("bunchId"))
+                fileRecords.append((bunchId, scanName, file))
+                filesByScanName[scanName].append(file)
 
-referenceFileSize = (
-    median(fileSizes.values())
-    if fileSizes
-    else None
-)
+    # Paths from different directories cannot be ordered meaningfully by their
+    # names alone. Merge them by the numeric bunch ID captured from each name.
+    fileRecords.sort(key=lambda record: record[0])
 
-minimumFileSize = (
-    referenceFileSize * minimumFileSizeRatio
-    if referenceFileSize is not None
-    else None
-)
+    # Keep the per-type convenience lists chronological as well. rsplit takes
+    # only the final underscore field, which is the bunch ID.
+    for files in filesByScanName.values():
+        files.sort(key=lambda file: int(file.stem.rsplit("_", 1)[-1]))
 
-brokenFiles = {
-    file
-    for file, fileSize in fileSizes.items()
-    if fileSize < minimumFileSize
-}
-
-# Merge all four folders into acquisition order.
-fileRecords.sort(key=lambda record: record[0])
-
-# Keep broken normal files in this list so their acquisition positions still
-# count. Removing them here would shift the 5*k background anchor indices.
-allDataFiles = [
-    file
-    for bunchId, scanName, file in fileRecords
-    if scanName == ""
-]
-
-# This is the clean normal-data list intended for subsequent analysis.
-dataFiles = [
-    file
-    for file in allDataFiles
-    if file not in brokenFiles
-]
-
-# Background groups store an anchor Path; this lookup converts it to the
-# zero-based position in the normal-data stream.
-dataIndexByFile = {
-    file: index
-    for index, file in enumerate(allDataFiles)
-}
-
-backgroundGroups = []
-invalidBackgroundGroups = []
-
-# Map every file back to its bunch ID and retain the background records in
-# chronological order. A background attempt is defined by timing: it starts
-# after normal scan 5*k and ends before the next normal scan.
-bunchIdByFile = {
-    file: bunchId
-    for bunchId, scanName, file in fileRecords
-}
-backgroundRecords = [
-    (bunchId, scanName, file)
-    for bunchId, scanName, file in fileRecords
-    if scanName in backgroundNames
-]
-
-for anchorIndex in range(0, len(allDataFiles), 5):
-    anchorFile = allDataFiles[anchorIndex]
-    windowStartBunchId = bunchIdByFile[anchorFile]
-
-    # Backgrounds are acquired immediately after the anchor. The next normal
-    # file closes this timing window, even if the background attempt was broken.
-    nextDataIndex = anchorIndex + 1
-    windowEndBunchId = (
-        bunchIdByFile[allDataFiles[nextDataIndex]]
-        if nextDataIndex < len(allDataFiles)
-        else float("inf")
+    # ------------------------------------------------------------------
+    # Stage 2: detect files from interrupted acquisitions by their size.
+    # ------------------------------------------------------------------
+    # The median is insensitive to a small number of interrupted acquisitions.
+    fileSizes = {
+        file: file.stat().st_size
+        for _, _, file in fileRecords
+    }
+    referenceFileSize = median(fileSizes.values()) if fileSizes else None
+    minimumFileSize = (
+        referenceFileSize * minimumFileSizeRatio
+        if referenceFileSize is not None
+        else None
     )
-
-    windowBackgrounds = [
-        (bunchId, scanName, file)
-        for bunchId, scanName, file in backgroundRecords
-        if windowStartBunchId < bunchId < windowEndBunchId
-    ]
-
-    # Keep the first valid acquisition of each required type as the triplet.
-    # A broken acquisition is retained for diagnostics, while a later valid
-    # retry of the same type can repair this timing window without shifting
-    # any subsequent triplets.
-    backgroundSet = {}
-    extraBackgrounds = []
-    rejectedBackgrounds = []
-
-    for bunchId, scanName, file in windowBackgrounds:
-        if file in brokenFiles:
-            rejectedBackgrounds.append(file)
-        elif scanName in backgroundSet:
-            extraBackgrounds.append(file)
-        else:
-            backgroundSet[scanName] = file
-
-    completedGroup = {
-        "anchorIndex": anchorIndex,
-        "anchorFile": anchorFile,
-        "backgrounds": backgroundSet,
-        "extraBackgrounds": extraBackgrounds,
-        "rejectedBackgrounds": rejectedBackgrounds,
-        "dataFiles": [],
+    brokenFiles = {
+        file
+        for file, fileSize in fileSizes.items()
+        if fileSize < minimumFileSize
     }
 
-    hasAllBackgrounds = all(
-        name in backgroundSet
-        for name in backgroundNames
-    )
-    if hasAllBackgrounds:
-        backgroundGroups.append(completedGroup)
-    else:
-        invalidBackgroundGroups.append(completedGroup)
+    # Broken normal files remain in allDataFiles because their physical indices
+    # must still count when locating the 5*k background timing windows.
+    allDataFiles = [
+        file
+        for _, scanName, file in fileRecords
+        if scanName == ""
+    ]
+    dataFiles = [file for file in allDataFiles if file not in brokenFiles]
+    dataIndexByFile = {
+        file: index
+        for index, file in enumerate(allDataFiles)
+    }
+    bunchIdByFile = {
+        file: bunchId
+        for bunchId, _, file in fileRecords
+    }
+    backgroundRecords = [
+        (bunchId, scanName, file)
+        for bunchId, scanName, file in fileRecords
+        if scanName in backgroundNames
+    ]
 
-# Usually this is already chronological, but sorting by anchor makes the
-# assignment below independent of background acquisition order.
-backgroundGroups.sort(
-    key=lambda group: group["anchorIndex"]
-)
+    backgroundGroups = []
+    invalidBackgroundGroups = []
 
-# A background applies from its anchor scan up to, but not
-# including, the next background's anchor scan.
-backgroundsForFile = {}
-filesWithoutBackground = []
-brokenDataFiles = []
+    # ------------------------------------------------------------------
+    # Stage 3: separate background attempts into acquisition-time windows.
+    # ------------------------------------------------------------------
+    # A background attempt occurs after normal scan 5*k and before the next
+    # normal file. A later valid retry can replace a broken attempt in a window.
+    for anchorIndex in range(0, len(allDataFiles), 5):
+        # Normal indices 0, 5, 10, ... are the scans after which a background
+        # triplet is expected. The anchor remains in its own five-scan block.
+        anchorFile = allDataFiles[anchorIndex]
+        windowStartBunchId = bunchIdByFile[anchorFile]
+        nextDataIndex = anchorIndex + 1
 
-# Preload the earliest complete background group. If one or more leading
-# background windows are incomplete, their data files fall forward into this
-# closest following valid group. This also leaves the existing trailing
-# behaviour unchanged: data after an incomplete final window keep using the
-# closest preceding valid group.
-currentGroup = backgroundGroups[0] if backgroundGroups else None
-nextGroupIndex = 1 if backgroundGroups else 0
+        # Only files acquired between the anchor and the immediately following
+        # normal scan belong to this attempt. For the final normal scan there
+        # is no upper boundary, so infinity keeps any later backgrounds.
+        windowEndBunchId = (
+            bunchIdByFile[allDataFiles[nextDataIndex]]
+            if nextDataIndex < len(allDataFiles)
+            else float("inf")
+        )
+        windowBackgrounds = [
+            (bunchId, scanName, file)
+            for bunchId, scanName, file in backgroundRecords
+            if windowStartBunchId < bunchId < windowEndBunchId
+        ]
 
-# Move forward through every normal acquisition, including broken ones, so the
-# original indices remain stable. Only clean files are added to analysis groups.
-for dataIndex, dataFile in enumerate(allDataFiles):
-    while (
-        nextGroupIndex < len(backgroundGroups)
-        and backgroundGroups[nextGroupIndex]["anchorIndex"]
-        <= dataIndex
-    ):
-        currentGroup = backgroundGroups[nextGroupIndex]
-        nextGroupIndex += 1
+        backgroundSet = {}
+        extraBackgrounds = []
+        rejectedBackgrounds = []
 
-    if dataFile in brokenFiles:
-        brokenDataFiles.append(dataFile)
-        continue
+        # Records are already chronological. Select the first usable file of
+        # each required type, retain undersized attempts as rejected, and mark
+        # any additional usable acquisitions of the same type as extras.
+        for _, scanName, file in windowBackgrounds:
+            if file in brokenFiles:
+                rejectedBackgrounds.append(file)
+            elif scanName in backgroundSet:
+                extraBackgrounds.append(file)
+            else:
+                backgroundSet[scanName] = file
 
-    if currentGroup is None:
-        # This now happens only when no complete background group exists at all.
-        # Retain these files explicitly instead of silently dropping them.
-        filesWithoutBackground.append(dataFile)
-        continue
+        group = {
+            "anchorIndex": anchorIndex,
+            "anchorFile": anchorFile,
+            "backgrounds": backgroundSet,
+            "extraBackgrounds": extraBackgrounds,
+            "rejectedBackgrounds": rejectedBackgrounds,
+            "dataFiles": [],
+        }
 
-    currentGroup["dataFiles"].append(dataFile)
-    backgroundsForFile[dataFile] = currentGroup["backgrounds"]
+        # A group is usable only when every requested background type exists.
+        # Incomplete attempts remain available for diagnostics, but are never
+        # assigned to normal data.
+        target = (
+            backgroundGroups
+            if all(name in backgroundSet for name in backgroundNames)
+            else invalidBackgroundGroups
+        )
+        target.append(group)
 
-if verbose:
+    backgroundGroups.sort(key=lambda group: group["anchorIndex"])
+
+    # ------------------------------------------------------------------
+    # Stage 4: assign clean normal files to the closest applicable valid group.
+    # ------------------------------------------------------------------
+    backgroundsForFile = {}
+    filesWithoutBackground = []
+    brokenDataFiles = []
+
+    # Leading data fall forward to the earliest complete background group.
+    # Data after an incomplete final window retain the closest preceding group.
+    currentGroup = backgroundGroups[0] if backgroundGroups else None
+    nextGroupIndex = 1 if backgroundGroups else 0
+
+    # Walk the normal stream once in physical index order. currentGroup changes
+    # only when the next complete group's anchor is reached. Consequently, an
+    # incomplete middle window is bridged by the preceding complete group.
+    for dataIndex, dataFile in enumerate(allDataFiles):
+        while (
+            nextGroupIndex < len(backgroundGroups)
+            and backgroundGroups[nextGroupIndex]["anchorIndex"] <= dataIndex
+        ):
+            currentGroup = backgroundGroups[nextGroupIndex]
+            nextGroupIndex += 1
+
+        if dataFile in brokenFiles:
+            # Broken data retain their original positions but are not usable.
+            brokenDataFiles.append(dataFile)
+        elif currentGroup is None:
+            # This occurs only if no complete background group was found.
+            filesWithoutBackground.append(dataFile)
+        else:
+            # Store both directions: the group contains its normal files, and
+            # each normal file can directly retrieve its background dictionary.
+            currentGroup["dataFiles"].append(dataFile)
+            backgroundsForFile[dataFile] = currentGroup["backgrounds"]
+
+    # This is the final analysis-ready list: files must pass the size check and
+    # also have a complete background set assigned.
+    usableDataFiles = [
+        file
+        for file in dataFiles
+        if file in backgroundsForFile
+    ]
+
+    results = {
+        "backgroundGroups": backgroundGroups,
+        "invalidBackgroundGroups": invalidBackgroundGroups,
+        "backgroundsForFile": backgroundsForFile,
+        "usableDataFiles": usableDataFiles,
+        "dataFiles": dataFiles,
+        "allDataFiles": allDataFiles,
+        "filesByScanName": filesByScanName,
+        "filesWithoutBackground": filesWithoutBackground,
+        "brokenFiles": brokenFiles,
+        "brokenDataFiles": brokenDataFiles,
+        "fileSizes": fileSizes,
+        "referenceFileSize": referenceFileSize,
+        "minimumFileSize": minimumFileSize,
+        "backgroundNames": backgroundNames,
+        "dataIndexByFile": dataIndexByFile,
+    }
+
+    if verbose:
+        _printScanResults(results)
+
+    return results
+
+
+def _printScanResults(results):
+    """Print the detailed diagnostics produced by scanFiles()."""
+    referenceFileSize = results["referenceFileSize"]
+    minimumFileSize = results["minimumFileSize"]
+    brokenFiles = results["brokenFiles"]
+    fileSizes = results["fileSizes"]
+    allDataFiles = results["allDataFiles"]
+    dataIndexByFile = results["dataIndexByFile"]
+    backgroundsForFile = results["backgroundsForFile"]
+    backgroundNames = results["backgroundNames"]
+    backgroundGroups = results["backgroundGroups"]
+    invalidGroups = results["invalidBackgroundGroups"]
+
+    if referenceFileSize is None:
+        print("No matching HDF5 files found.")
+        return
+
     print(f"Reference file size: {referenceFileSize:.0f} bytes")
     print(f"Minimum accepted size: {minimumFileSize:.0f} bytes")
     print(f"Broken files: {len(brokenFiles)}")
 
     for brokenFile in sorted(brokenFiles):
-        print(
-            f"  {brokenFile}: {fileSizes[brokenFile]} bytes"
-        )
+        print(f"  {brokenFile}: {fileSizes[brokenFile]} bytes")
 
-    # Print every normal scan, including broken acquisitions, so the original
-    # zero-based indices remain visible and no failed scan silently disappears.
     for dataFile in allDataFiles:
         dataIndex = dataIndexByFile[dataFile]
         print(f"\nData [{dataIndex}]: {dataFile}")
@@ -284,31 +315,25 @@ if verbose:
         if dataFile in brokenFiles:
             sizeRatio = fileSizes[dataFile] / referenceFileSize
             print(
-                "  BROKEN: "
-                f"{fileSizes[dataFile]} bytes "
+                f"  BROKEN: {fileSizes[dataFile]} bytes "
                 f"({sizeRatio:.1%} of reference size)"
             )
             continue
 
         backgroundSet = backgroundsForFile.get(dataFile)
-
         if backgroundSet is None:
             print("  No background set assigned")
             continue
 
         for backgroundName in backgroundNames:
-            print(
-                f"  {backgroundName}: "
-                f"{backgroundSet[backgroundName]}"
-            )
+            print(f"  {backgroundName}: {backgroundSet[backgroundName]}")
 
-    # Optional summary of each background group.
     print(
         f"\nBackground timing windows: "
-        f"{len(backgroundGroups) + len(invalidBackgroundGroups)}"
+        f"{len(backgroundGroups) + len(invalidGroups)}"
     )
     print(f"Valid background groups: {len(backgroundGroups)}")
-    print(f"Invalid background groups: {len(invalidBackgroundGroups)}")
+    print(f"Invalid background groups: {len(invalidGroups)}")
     print(
         "Repaired background groups: "
         f"{sum(bool(group['rejectedBackgrounds']) for group in backgroundGroups)}"
@@ -316,50 +341,47 @@ if verbose:
     print("\nBackground groups:")
 
     for groupIndex, group in enumerate(backgroundGroups):
-        firstDataIndex = group["anchorIndex"]
-        groupDataFiles = group["dataFiles"]
-
         print(
             f"\nGroup {groupIndex}: "
-            f"starts at data index {firstDataIndex}"
+            f"starts at data index {group['anchorIndex']}"
         )
         print(f"  Anchor: {group['anchorFile']}")
-        print(f"  Number of data files: {len(groupDataFiles)}")
+        print(f"  Number of data files: {len(group['dataFiles'])}")
 
         for backgroundName in backgroundNames:
-            print(
-                f"  {backgroundName}: "
-                f"{group['backgrounds'][backgroundName]}"
-            )
+            print(f"  {backgroundName}: {group['backgrounds'][backgroundName]}")
+        for rejectedFile in group["rejectedBackgrounds"]:
+            print(f"  Rejected attempt: {rejectedFile}")
 
-        for rejectedBackground in group["rejectedBackgrounds"]:
-            print(f"  Rejected attempt: {rejectedBackground}")
-
-    if invalidBackgroundGroups:
+    if invalidGroups:
         print("\nRejected background groups:")
 
-        for group in invalidBackgroundGroups:
+        for group in invalidGroups:
             print(f"  Anchor: {group['anchorFile']}")
 
             for backgroundName in backgroundNames:
                 backgroundFile = group["backgrounds"].get(backgroundName)
-
                 if backgroundFile is None:
                     print(f"    {backgroundName}: MISSING")
-                    continue
+                else:
+                    print(f"    {backgroundName} (valid): {backgroundFile}")
 
-                status = (
-                    "BROKEN"
-                    if backgroundFile in brokenFiles
-                    else "valid"
-                )
-                print(
-                    f"    {backgroundName} ({status}): "
-                    f"{backgroundFile}"
-                )
+            for extraFile in group["extraBackgrounds"]:
+                print(f"    Extra: {extraFile}")
+            for rejectedFile in group["rejectedBackgrounds"]:
+                print(f"    Rejected attempt: {rejectedFile}")
 
-            for extraBackground in group["extraBackgrounds"]:
-                print(f"    Extra: {extraBackground}")
 
-            for rejectedBackground in group["rejectedBackgrounds"]:
-                print(f"    Rejected attempt: {rejectedBackground}")
+if __name__ == "__main__":
+    results = scanFiles(
+        folderData=Path(r"C:/git/Trieste/Data"),
+        sampleName="FeRh_A04",
+        scanNames=["Scan", "", "NoProbe", "OnlyProbe", "Dark"],
+        scanNo=68,
+        verbose=False,
+        minimumFileSizeRatio=0.95,
+    )
+
+    # The two main outputs for downstream analysis:
+    backgroundGroups = results["backgroundGroups"]
+    usableDataFiles = results["usableDataFiles"]
