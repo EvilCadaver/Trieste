@@ -17,6 +17,15 @@ minimumFileSizeRatio = 0.95
 # Verbose reporting on file scan results
 verbose = False
 
+## Single file analysis for now
+## HDF5 package paths
+h5CCDImagePath = "/CCD/Image"
+h5DelayPath = "/photon_source/SeedLaser/Delay_line_2"
+# Delay zero setting
+delayZero = -3096.49
+# Single scan index to analyse
+dataIndex = 90
+
 ## Calling the folder scanning function
 results = scanFiles(
     folderData=folderData,
@@ -62,14 +71,6 @@ print(
     f"{sum(bool(group['rejectedBackgrounds']) for group in backgroundGroups)}"
 )
 
-## Single file analysis for now
-## HDF5 file paths and settings
-h5CCDImagePath = "/CCD/Image"
-h5DelayPath = "/photon_source/SeedLaser/Delay_line_2"
-delayZero = -3096.49
-
-# Songle scan index to analyse
-dataIndex = 90
 ## Check for validity
 print(f"Chosen scan index: {dataIndex}")
 try:
