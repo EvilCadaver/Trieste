@@ -3,3 +3,39 @@ Data/
 Output/
 *.m
 .codex/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Python virtual environments and local configuration
+.venv/
+venv/
+env/
+.env
+.env.*
+!.env.example
+
+# Python build and packaging output
+build/
+dist/
+*.egg-info/
+
+# Editor and operating-system metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# MATLAB-generated working files
+*.asv
+*.autosave
+slprj/
+codegen/
