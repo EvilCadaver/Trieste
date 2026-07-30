@@ -22,7 +22,7 @@ scanNames = ["Scan", "", "NoProbe", "OnlyProbe", "Dark"]
 
 # Leading zeroes in the on-disk scan number are accepted, so scanNo=61
 # matches names containing both "61" and "061".
-scanNo = 61
+scanNo = 68
 
 # Enable the detailed data-to-background mapping printed at the end.
 verbose = True
@@ -152,57 +152,74 @@ dataIndexByFile = {
     for index, file in enumerate(allDataFiles)
 }
 
-pendingBackgrounds = {}
-backgroundAnchorFile = None
-latestDataFile = None
 backgroundGroups = []
 invalidBackgroundGroups = []
 
-# Walk the complete time-ordered stream to find the normal scan immediately
-# preceding each background sequence. That scan is the 5*k anchor: the newly
-# completed background applies to it and to subsequent normal scans until the
-# next anchor is reached.
-for bunchId, scanName, file in fileRecords:
-    if scanName == "":
-        latestDataFile = file
-        continue
+# Map every file back to its bunch ID and retain the background records in
+# chronological order. A background attempt is defined by timing: it starts
+# after normal scan 5*k and ends before the next normal scan.
+bunchIdByFile = {
+    file: bunchId
+    for bunchId, scanName, file in fileRecords
+}
+backgroundRecords = [
+    (bunchId, scanName, file)
+    for bunchId, scanName, file in fileRecords
+    if scanName in backgroundNames
+]
 
-    if scanName not in backgroundNames:
-        continue
+for anchorIndex in range(0, len(allDataFiles), 5):
+    anchorFile = allDataFiles[anchorIndex]
+    windowStartBunchId = bunchIdByFile[anchorFile]
 
-    # The first background file marks the start of a new set. Save the latest
-    # normal file now because the three background types may arrive in any order.
-    if not pendingBackgrounds:
-        backgroundAnchorFile = latestDataFile
+    # Backgrounds are acquired immediately after the anchor. The next normal
+    # file closes this timing window, even if the background attempt was broken.
+    nextDataIndex = anchorIndex + 1
+    windowEndBunchId = (
+        bunchIdByFile[allDataFiles[nextDataIndex]]
+        if nextDataIndex < len(allDataFiles)
+        else float("inf")
+    )
 
-    pendingBackgrounds[scanName] = file
+    windowBackgrounds = [
+        (bunchId, scanName, file)
+        for bunchId, scanName, file in backgroundRecords
+        if windowStartBunchId < bunchId < windowEndBunchId
+    ]
 
-    # Do not publish a partial set. It becomes usable only when every required
-    # background type has appeared.
-    if all(name in pendingBackgrounds for name in backgroundNames):
-        backgroundSet = {
-            name: pendingBackgrounds[name]
-            for name in backgroundNames
-        }
+    # Keep the first valid acquisition of each required type as the triplet.
+    # A broken acquisition is retained for diagnostics, while a later valid
+    # retry of the same type can repair this timing window without shifting
+    # any subsequent triplets.
+    backgroundSet = {}
+    extraBackgrounds = []
+    rejectedBackgrounds = []
 
-        if backgroundAnchorFile is not None:
-            completedGroup = {
-                "anchorIndex": dataIndexByFile[backgroundAnchorFile],
-                "anchorFile": backgroundAnchorFile,
-                "backgrounds": backgroundSet,
-                "dataFiles": [],
-            }
+    for bunchId, scanName, file in windowBackgrounds:
+        if file in brokenFiles:
+            rejectedBackgrounds.append(file)
+        elif scanName in backgroundSet:
+            extraBackgrounds.append(file)
+        else:
+            backgroundSet[scanName] = file
 
-            # One incomplete background file makes the entire subtraction set
-            # unreliable. Keep it for diagnostics, but do not activate it.
-            if any(file in brokenFiles for file in backgroundSet.values()):
-                invalidBackgroundGroups.append(completedGroup)
-            else:
-                backgroundGroups.append(completedGroup)
+    completedGroup = {
+        "anchorIndex": anchorIndex,
+        "anchorFile": anchorFile,
+        "backgrounds": backgroundSet,
+        "extraBackgrounds": extraBackgrounds,
+        "rejectedBackgrounds": rejectedBackgrounds,
+        "dataFiles": [],
+    }
 
-        # Reset the accumulator so the next background file starts a new set.
-        pendingBackgrounds.clear()
-        backgroundAnchorFile = None
+    hasAllBackgrounds = all(
+        name in backgroundSet
+        for name in backgroundNames
+    )
+    if hasAllBackgrounds:
+        backgroundGroups.append(completedGroup)
+    else:
+        invalidBackgroundGroups.append(completedGroup)
 
 # Usually this is already chronological, but sorting by anchor makes the
 # assignment below independent of background acquisition order.
@@ -253,11 +270,20 @@ if verbose:
             f"  {brokenFile}: {fileSizes[brokenFile]} bytes"
         )
 
-    # Print every normal scan and its assigned background set. This is the most
-    # direct way to verify the 0..4, 5..9, ... grouping convention.
-    for dataFile in dataFiles:
+    # Print every normal scan, including broken acquisitions, so the original
+    # zero-based indices remain visible and no failed scan silently disappears.
+    for dataFile in allDataFiles:
         dataIndex = dataIndexByFile[dataFile]
         print(f"\nData [{dataIndex}]: {dataFile}")
+
+        if dataFile in brokenFiles:
+            sizeRatio = fileSizes[dataFile] / referenceFileSize
+            print(
+                "  BROKEN: "
+                f"{fileSizes[dataFile]} bytes "
+                f"({sizeRatio:.1%} of reference size)"
+            )
+            continue
 
         backgroundSet = backgroundsForFile.get(dataFile)
 
@@ -272,6 +298,16 @@ if verbose:
             )
 
     # Optional summary of each background group.
+    print(
+        f"\nBackground timing windows: "
+        f"{len(backgroundGroups) + len(invalidBackgroundGroups)}"
+    )
+    print(f"Valid background groups: {len(backgroundGroups)}")
+    print(f"Invalid background groups: {len(invalidBackgroundGroups)}")
+    print(
+        "Repaired background groups: "
+        f"{sum(bool(group['rejectedBackgrounds']) for group in backgroundGroups)}"
+    )
     print("\nBackground groups:")
 
     for groupIndex, group in enumerate(backgroundGroups):
@@ -291,6 +327,9 @@ if verbose:
                 f"{group['backgrounds'][backgroundName]}"
             )
 
+        for rejectedBackground in group["rejectedBackgrounds"]:
+            print(f"  Rejected attempt: {rejectedBackground}")
+
     if invalidBackgroundGroups:
         print("\nRejected background groups:")
 
@@ -298,7 +337,12 @@ if verbose:
             print(f"  Anchor: {group['anchorFile']}")
 
             for backgroundName in backgroundNames:
-                backgroundFile = group["backgrounds"][backgroundName]
+                backgroundFile = group["backgrounds"].get(backgroundName)
+
+                if backgroundFile is None:
+                    print(f"    {backgroundName}: MISSING")
+                    continue
+
                 status = (
                     "BROKEN"
                     if backgroundFile in brokenFiles
@@ -309,3 +353,8 @@ if verbose:
                     f"{backgroundFile}"
                 )
 
+            for extraBackground in group["extraBackgrounds"]:
+                print(f"    Extra: {extraBackground}")
+
+            for rejectedBackground in group["rejectedBackgrounds"]:
+                print(f"    Rejected attempt: {rejectedBackground}")
