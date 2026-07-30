@@ -26,6 +26,22 @@ delayZero = -3096.49
 # Single scan index to analyse
 dataIndex = 90
 
+## Scan measurement parameters
+NBinn = 2                       #Binning of the detector
+SizePixel = NBinn * 13.5e-6     #Pixel edge length, m
+Lambda = 23.5e-9                #Wavelength, m
+CY1 = 1024/NBinn - 1            #Reflection centre Y, pixels
+CX1 = 150/NBinn - 1             #Reflection centre X, pixels
+RCCD = 67e-3                    #Distance to detector's CY1, CX1, m
+OMEGA = 33 /180*np.pi         #Incidence beam angle, rad
+CHI = 45 /180*np.pi             #Detector angle, rad
+
+# ROI for the background zero substraction
+roiBG = np.s_[400:440, 160:210] 
+
+## Masking regions, will be added to the empty mask, add rectangles as np.s_[y0:y1,x0:x1] to the list [ ] structure.
+maskBS = [np.s_[379:647,0:222], np.s_[511:1024,29:120]]
+
 ## Calling the folder scanning function
 results = scanFiles(
     folderData=folderData,
@@ -97,7 +113,7 @@ else:
             print("OnlyProbe:", backgrounds["OnlyProbe"])
             print("Dark:", backgrounds["Dark"])
 
-## Opening files
+## Reading data files for 'dataIndex'
 
 with h5py.File(dataFilePath, "r") as h5:
     imageScan = h5[h5CCDImagePath][...]
@@ -116,35 +132,22 @@ with h5py.File(backgrounds["OnlyProbe"], "r") as h5:
     imageOnlyProbe = h5[h5CCDImagePath][...]
     imageOnlyProbe = np.rot90(imageOnlyProbe.T, 2)
 
-NBinn = 2
-SizePixel = NBinn * 13.5e-6     #Pixel edge length, m
-Lambda = 23.5e-9                #Wavelength, m
-CY1 = 1024/NBinn - 1            #Reflection centre Y, pixels
-CX1 = 150/NBinn - 1             #Reflection centre X, pixels
-RCCD = 67e-3                    #Distance to detector's CY1, CX1, m
-OMEGA = 33 /180*np.pi         #Incidence beam angle, rad
-CHI = 45 /180*np.pi             #Detector angle, rad
-
-roiBG = np.s_[400:440, 160:210] # ROI of the background assumption
-
+## BeamStop masking
 maskBeamStop = np.ones_like(imageScan, dtype=bool)
-maskBeamStop[379:647,0:222] = False
-maskBeamStop[511:1024,29:120] = False
+for mask in maskBS:
+    maskBeamStop[mask] = False
 
 normNoProbe = np.sum(imageScan[roiBG])/np.sum(imageNoProbe[roiBG])
-
 imageDifferential = (imageScan - normNoProbe * imageNoProbe)
 
 normDark = np.sum(imageOnlyProbe[roiBG])/np.sum(imageDark[roiBG])
-
 imageDifferentialNoProbe = (imageOnlyProbe - normDark * imageDark)
 
 normScan = np.sum(imageDifferential * maskBeamStop)
 normOnlyProbe = np.sum(imageDifferentialNoProbe * maskBeamStop)
-
 image = (imageDifferential/normScan - imageDifferentialNoProbe/normOnlyProbe) * maskBeamStop
 
-
+## Plotting detector image
 valid = image[maskBeamStop & np.isfinite(image)]
 
 vmin = 0.1 * valid.min()
