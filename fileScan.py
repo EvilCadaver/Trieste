@@ -233,8 +233,13 @@ backgroundsForFile = {}
 filesWithoutBackground = []
 brokenDataFiles = []
 
-currentGroup = None
-nextGroupIndex = 0
+# Preload the earliest complete background group. If one or more leading
+# background windows are incomplete, their data files fall forward into this
+# closest following valid group. This also leaves the existing trailing
+# behaviour unchanged: data after an incomplete final window keep using the
+# closest preceding valid group.
+currentGroup = backgroundGroups[0] if backgroundGroups else None
+nextGroupIndex = 1 if backgroundGroups else 0
 
 # Move forward through every normal acquisition, including broken ones, so the
 # original indices remain stable. Only clean files are added to analysis groups.
@@ -252,8 +257,8 @@ for dataIndex, dataFile in enumerate(allDataFiles):
         continue
 
     if currentGroup is None:
-        # This can happen only when normal files precede the first background
-        # anchor. Retain them explicitly instead of silently dropping them.
+        # This now happens only when no complete background group exists at all.
+        # Retain these files explicitly instead of silently dropping them.
         filesWithoutBackground.append(dataFile)
         continue
 
