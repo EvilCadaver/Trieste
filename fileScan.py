@@ -2,6 +2,7 @@ import h5py
 from pathlib import Path
 import re
 import numpy as np
+from statistics import median
 
 # This script discovers one numbered acquisition and associates each normal
 # data file with the background set acquired after the first file in its
@@ -25,6 +26,11 @@ scanNo = 61
 
 # Enable the detailed data-to-background mapping printed at the end.
 verbose = True
+
+# A file is considered broken when it is more than 5% smaller than the median
+# file size for this acquisition. The median represents the majority well and
+# is not strongly affected by a small number of incomplete files.
+minimumFileSizeRatio = 0.95
 
 folderSample = folderData / sampleName
 
@@ -95,26 +101,62 @@ for scanName in scanNames[1:]:
             fileRecords.append((bunchId, scanName, file))
             filesByScanName[scanName].append(file)
 
+# Determine the typical size using all normal and background files belonging
+# to this scan number. Their expected sizes differ by less than 1%, while an
+# acquisition interrupted by a FEL failure should be a much smaller outlier.
+fileSizes = {
+    file: file.stat().st_size
+    for bunchId, scanName, file in fileRecords
+}
+
+referenceFileSize = (
+    median(fileSizes.values())
+    if fileSizes
+    else None
+)
+
+minimumFileSize = (
+    referenceFileSize * minimumFileSizeRatio
+    if referenceFileSize is not None
+    else None
+)
+
+brokenFiles = {
+    file
+    for file, fileSize in fileSizes.items()
+    if fileSize < minimumFileSize
+}
+
 # Merge all four folders into acquisition order.
 fileRecords.sort(key=lambda record: record[0])
 
-dataFiles = [
+# Keep broken normal files in this list so their acquisition positions still
+# count. Removing them here would shift the 5*k background anchor indices.
+allDataFiles = [
     file
     for bunchId, scanName, file in fileRecords
     if scanName == ""
+]
+
+# This is the clean normal-data list intended for subsequent analysis.
+dataFiles = [
+    file
+    for file in allDataFiles
+    if file not in brokenFiles
 ]
 
 # Background groups store an anchor Path; this lookup converts it to the
 # zero-based position in the normal-data stream.
 dataIndexByFile = {
     file: index
-    for index, file in enumerate(dataFiles)
+    for index, file in enumerate(allDataFiles)
 }
 
 pendingBackgrounds = {}
 backgroundAnchorFile = None
 latestDataFile = None
 backgroundGroups = []
+invalidBackgroundGroups = []
 
 # Walk the complete time-ordered stream to find the normal scan immediately
 # preceding each background sequence. That scan is the 5*k anchor: the newly
@@ -138,16 +180,25 @@ for bunchId, scanName, file in fileRecords:
     # Do not publish a partial set. It becomes usable only when every required
     # background type has appeared.
     if all(name in pendingBackgrounds for name in backgroundNames):
+        backgroundSet = {
+            name: pendingBackgrounds[name]
+            for name in backgroundNames
+        }
+
         if backgroundAnchorFile is not None:
-            backgroundGroups.append({
+            completedGroup = {
                 "anchorIndex": dataIndexByFile[backgroundAnchorFile],
                 "anchorFile": backgroundAnchorFile,
-                "backgrounds": {
-                    name: pendingBackgrounds[name]
-                    for name in backgroundNames
-                },
+                "backgrounds": backgroundSet,
                 "dataFiles": [],
-            })
+            }
+
+            # One incomplete background file makes the entire subtraction set
+            # unreliable. Keep it for diagnostics, but do not activate it.
+            if any(file in brokenFiles for file in backgroundSet.values()):
+                invalidBackgroundGroups.append(completedGroup)
+            else:
+                backgroundGroups.append(completedGroup)
 
         # Reset the accumulator so the next background file starts a new set.
         pendingBackgrounds.clear()
@@ -163,14 +214,14 @@ backgroundGroups.sort(
 # including, the next background's anchor scan.
 backgroundsForFile = {}
 filesWithoutBackground = []
+brokenDataFiles = []
 
 currentGroup = None
 nextGroupIndex = 0
 
-# Move forward through normal data once. Whenever an anchor is reached, switch
-# to its background set. This also makes trailing files use the most recent
-# background, as required when acquisition ends before another set is taken.
-for dataIndex, dataFile in enumerate(dataFiles):
+# Move forward through every normal acquisition, including broken ones, so the
+# original indices remain stable. Only clean files are added to analysis groups.
+for dataIndex, dataFile in enumerate(allDataFiles):
     while (
         nextGroupIndex < len(backgroundGroups)
         and backgroundGroups[nextGroupIndex]["anchorIndex"]
@@ -178,6 +229,10 @@ for dataIndex, dataFile in enumerate(dataFiles):
     ):
         currentGroup = backgroundGroups[nextGroupIndex]
         nextGroupIndex += 1
+
+    if dataFile in brokenFiles:
+        brokenDataFiles.append(dataFile)
+        continue
 
     if currentGroup is None:
         # This can happen only when normal files precede the first background
@@ -189,9 +244,19 @@ for dataIndex, dataFile in enumerate(dataFiles):
     backgroundsForFile[dataFile] = currentGroup["backgrounds"]
 
 if verbose:
+    print(f"Reference file size: {referenceFileSize:.0f} bytes")
+    print(f"Minimum accepted size: {minimumFileSize:.0f} bytes")
+    print(f"Broken files: {len(brokenFiles)}")
+
+    for brokenFile in sorted(brokenFiles):
+        print(
+            f"  {brokenFile}: {fileSizes[brokenFile]} bytes"
+        )
+
     # Print every normal scan and its assigned background set. This is the most
     # direct way to verify the 0..4, 5..9, ... grouping convention.
-    for dataIndex, dataFile in enumerate(dataFiles):
+    for dataFile in dataFiles:
+        dataIndex = dataIndexByFile[dataFile]
         print(f"\nData [{dataIndex}]: {dataFile}")
 
         backgroundSet = backgroundsForFile.get(dataFile)
@@ -225,4 +290,22 @@ if verbose:
                 f"  {backgroundName}: "
                 f"{group['backgrounds'][backgroundName]}"
             )
+
+    if invalidBackgroundGroups:
+        print("\nRejected background groups:")
+
+        for group in invalidBackgroundGroups:
+            print(f"  Anchor: {group['anchorFile']}")
+
+            for backgroundName in backgroundNames:
+                backgroundFile = group["backgrounds"][backgroundName]
+                status = (
+                    "BROKEN"
+                    if backgroundFile in brokenFiles
+                    else "valid"
+                )
+                print(
+                    f"    {backgroundName} ({status}): "
+                    f"{backgroundFile}"
+                )
 
