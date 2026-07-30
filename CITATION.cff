@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite it."
-title: "Elettra Sincrotrone Trieste data-analysis tools"
+title: "Elettra Sincrotrone Trieste EIS-Timer data-analysis tools"
 authors:
   - family-names: "Musiienko"
     given-names: "Denys"

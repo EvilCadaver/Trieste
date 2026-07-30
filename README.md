@@ -1,4 +1,4 @@
-# Trieste HDF5 Scan Analysis
+# Elettra Sincrotrone Trieste EIS-Timer HDF5 Scan Analysis
 
 Tools for discovering FERMI HDF5 acquisitions, rejecting incomplete files,
 matching normal scans to their background acquisitions, and performing initial
