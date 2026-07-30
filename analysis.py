@@ -133,16 +133,16 @@ maskBeamStop[511:1024,29:120] = False
 
 normNoProbe = np.sum(imageScan[roiBG])/np.sum(imageNoProbe[roiBG])
 
-DESImg = (imageScan - normNoProbe * imageNoProbe)
+imageDifferential = (imageScan - normNoProbe * imageNoProbe)
 
 normDark = np.sum(imageOnlyProbe[roiBG])/np.sum(imageDark[roiBG])
 
-DESImgUP = (imageOnlyProbe - normDark * imageDark)
+imageDifferentialNoProbe = (imageOnlyProbe - normDark * imageDark)
 
-normScan = np.sum(DESImg * maskBeamStop)
-normNoProbe = np.sum(DESImgUP * maskBeamStop)
+normScan = np.sum(imageDifferential * maskBeamStop)
+normOnlyProbe = np.sum(imageDifferentialNoProbe * maskBeamStop)
 
-image = (DESImg/normScan - DESImgUP/normNoProbe) * maskBeamStop
+image = (imageDifferential/normScan - imageDifferentialNoProbe/normOnlyProbe) * maskBeamStop
 
 
 valid = image[maskBeamStop & np.isfinite(image)]
