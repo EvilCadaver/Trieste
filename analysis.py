@@ -146,6 +146,7 @@ for mask in maskBS:
 maskBGroi = ~np.ones_like(imageScan, dtype=bool)
 maskBGroi[roiBG] = True
 
+## Differential image formulation
 normNoProbe = np.sum(imageScan[roiBG])/np.sum(imageNoProbe[roiBG])
 imageDifferential = (imageScan - normNoProbe * imageNoProbe)
 
@@ -157,6 +158,7 @@ normOnlyProbe = np.sum(imageDifferentialNoProbe * maskBeamStop)
 
 image = (imageDifferential/normScan - imageDifferentialNoProbe/normOnlyProbe)
 
+## Masks allignment or image reconstraction for 'dataIndex'
 if allignMasks:
     image = image * (maskBeamStop ^ maskBGroi)
     image = image[roiAllignMasks]
@@ -171,10 +173,7 @@ else:
     vmin = 0.1 * valid.min()
     vmax = 0.1 * valid.max()
 
-
-
-
-## Plotting detector image
+## Plotting the 'image'
 plt.figure()
 
 plt.imshow(
@@ -190,5 +189,3 @@ plt.ylabel("Detector row")
 plt.title(f"Scan {dataIndex}, delay = {delayScan} ps")
 plt.colorbar(label="Intensity")
 plt.show(block=True)
-
-print(f"Delay: {delayScan}")
