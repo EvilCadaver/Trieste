@@ -27,17 +27,18 @@ delayZero = -3096.49
 dataIndex = 40
 
 ## Scan measurement parameters
-NBinn = 2                       #Binning of the detector
-SizePixel = NBinn * 13.5e-6     #Pixel edge length, m
-Lambda = 23.5e-9                #Wavelength, m
-CY1 = 1024/NBinn - 1            #Reflection centre Y, pixels
-CX1 = 150/NBinn - 1             #Reflection centre X, pixels
-RCCD = 67e-3                    #Distance to detector's CY1, CX1, m
-OMEGA = 33 /180*np.pi         #Incidence beam angle, rad
-CHI = 45 /180*np.pi             #Detector angle, rad
+N_BINN = 2                      #Binning of the detector
+PIXEL_SIZE = N_BINN * 13.5e-6   #Pixel edge length, m
+LAMBDA = 23.5e-9                #Wavelength, m
+CY0 = 511                       #Reflection centre Y, pixels
+CX0 = 49                        #Reflection centre X, pixels
+DCCD = 67e-3                    #Shortest distance from the incident point on the sample to the detector, m 
+ALPHA = 17 /180*np.pi           #Incidence beam angle, rad
+OMEGA = 16.5 /180*np.pi         #Angle between scattered beam maximum and the detector normal (positive towards the sample surface), rad
+BETA = ALPHA + OMEGA
 
 ## Make true for masks allignment
-allignMasks = False
+alignMasks = False
 roiAllignMasks = np.s_[400:600, 0:220]
 
 # ROI for the background zero substraction
@@ -159,7 +160,7 @@ normOnlyProbe = np.sum(imageDifferentialNoProbe * maskBeamStop)
 image = (imageDifferential/normScan - imageDifferentialNoProbe/normOnlyProbe)
 
 ## Masks allignment or image reconstraction for 'dataIndex'
-if allignMasks:
+if alignMasks:
     image = image * (maskBeamStop ^ maskBGroi)
     image = image[roiAllignMasks]
     valid = image[maskBGroi[roiAllignMasks] & np.isfinite(image)]
@@ -189,3 +190,33 @@ plt.ylabel("Detector row")
 plt.title(f"Scan {dataIndex}, delay = {delayScan} ps")
 plt.colorbar(label="Intensity")
 plt.show(block=True)
+
+if alignMasks:
+    exit()
+
+# Getting pixels coordinates
+height, width = image.shape
+# Coordinates in the detector plane
+v, u = np.indices((height, width))
+## Sample's coordinate system
+# Maximum of the scattered beam
+R0 = np.array([DCCD/np.cos(OMEGA)*np.cos(ALPHA), 0.0, -DCCD/np.cos(OMEGA)*np.sin(ALPHA)])
+# Detector's normal
+N_CCD = np.array([np.cos(BETA), 0.0, -np.sin(BETA)])
+# Detector's lines
+e_v = np.array([0.0, 1.0, 0.0])
+# Detector's columns
+# e_u = np.cross(e_v, N_CCD)
+e_u = np.array([-np.sin(BETA), 0.0, -np.cos(BETA)])
+# Each pixel's coordinate
+du = (u - CX0) * PIXEL_SIZE
+dv = (v - CY0) * PIXEL_SIZE
+
+R = (
+    R0
+    + du[..., None] * e_u
+    + dv[..., None] * e_v
+)
+
+Sf = R / np.linalg.norm(R, axis=-1, keepdims=True)
+
