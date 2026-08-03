@@ -52,6 +52,9 @@ Q3D_PLOT = False
 # Plot every fourth pixel to keep the interactive 3D plot responsive.
 Q3D_STEP = 4
 
+# Maximum number of reciprocal-space bins along the longer Qx/Qy dimension.
+Q_SPACE_BINS_MAX = 512
+
 ## Calling the folder scanning function
 results = scanFiles(
     folderData=folderData,
@@ -282,4 +285,84 @@ if Q3D_PLOT:
     fig.colorbar(dots, ax=ax, pad=0.12, label="Intensity")
     plt.tight_layout()
     plt.show()
+
+## Rebinning and plotting intensity in the Qx/Qy projection
+valid = (
+    maskBeamStop
+    & np.isfinite(image)
+    & np.all(np.isfinite(Q[..., :2]), axis=-1)
+)
+
+# Q is calculated in m^-1; use nm^-1 for plotting.
+qx_values = Q[..., 0][valid] * 1e-9
+qy_values = Q[..., 1][valid] * 1e-9
+intensity_values = image[valid]
+
+qx_min, qx_max = qx_values.min(), qx_values.max()
+qy_min, qy_max = qy_values.min(), qy_values.max()
+qx_span = qx_max - qx_min
+qy_span = qy_max - qy_min
+
+if Q_SPACE_BINS_MAX < 1:
+    raise ValueError("Q_SPACE_BINS_MAX must be a positive integer")
+
+# Use square reciprocal-space bins. The longer dimension has at most
+# Q_SPACE_BINS_MAX bins; the shorter dimension is scaled proportionally.
+dq = max(qx_span, qy_span) / Q_SPACE_BINS_MAX
+if not np.isfinite(dq) or dq <= 0:
+    raise ValueError("The Qx/Qy projection has no finite reciprocal-space extent")
+
+qx_bin_count = min(Q_SPACE_BINS_MAX, max(1, int(np.ceil(qx_span / dq))))
+qy_bin_count = min(Q_SPACE_BINS_MAX, max(1, int(np.ceil(qy_span / dq))))
+qx_edges = qx_min + np.arange(qx_bin_count + 1) * dq
+qy_edges = qy_min + np.arange(qy_bin_count + 1) * dq
+
+intensity_sum, _, _ = np.histogram2d(
+    qx_values,
+    qy_values,
+    bins=(qx_edges, qy_edges),
+    weights=intensity_values,
+)
+pixel_count, _, _ = np.histogram2d(
+    qx_values,
+    qy_values,
+    bins=(qx_edges, qy_edges),
+)
+
+# Average the intensities of all detector pixels assigned to each Q-space bin.
+intensity_qx_qy = np.divide(
+    intensity_sum,
+    pixel_count,
+    out=np.full_like(intensity_sum, np.nan),
+    where=pixel_count > 0,
+)
+
+finite_intensity = intensity_qx_qy[np.isfinite(intensity_qx_qy)]
+if finite_intensity.size == 0:
+    raise ValueError("No detector intensities were assigned to the Qx/Qy grid")
+
+# A symmetric scale represents positive and negative differential intensities
+# while reducing the influence of isolated extreme pixels.
+colour_limit = np.percentile(np.abs(finite_intensity), 99)
+if colour_limit == 0:
+    colour_limit = 1.0
+
+fig, ax = plt.subplots(figsize=(9, 7))
+q_space_plot = ax.pcolormesh(
+    qx_edges,
+    qy_edges,
+    intensity_qx_qy.T,
+    shading="flat",
+    cmap="RdBu_r",
+    vmin=-colour_limit,
+    vmax=colour_limit,
+)
+
+ax.set_aspect("equal", adjustable="box")
+ax.set_xlabel(r"$Q_x$ (nm$^{-1}$)")
+ax.set_ylabel(r"$Q_y$ (nm$^{-1}$)")
+ax.set_title(f"Scan {dataIndex}, delay = {delayScan} ps")
+fig.colorbar(q_space_plot, ax=ax, label="Mean intensity per bin")
+fig.tight_layout()
+plt.show()
 
