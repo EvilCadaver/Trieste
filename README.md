@@ -1,12 +1,11 @@
 # Elettra Sincrotrone Trieste EIS-Timer HDF5 Scan Analysis
 
 Tools for discovering FERMI HDF5 acquisitions, rejecting incomplete files,
-matching normal scans to their background acquisitions, and performing initial
-detector-image background subtraction.
+matching normal scans to their background acquisitions, correcting detector
+images, and projecting their intensities into reciprocal space.
 
-The reusable scanning logic is implemented in `fileScan.py`. It can be imported
-by analysis scripts without executing the example configuration at the bottom of
-that file.
+The main workflow is implemented in `analysis.py`. Reusable file discovery and
+background grouping are provided by `fileScan.py`.
 
 ## Requirements
 
@@ -197,12 +196,46 @@ with h5py.File(scanFilePath, "r") as h5:
     imageScan = h5["/CCD/Image"][...]
 ```
 
+## Detector and reciprocal-space analysis
+
+`analysis.py` performs the complete single-acquisition analysis. Configure the
+data location, sample and scan names, `scanNo`, and `dataIndex` near the top of
+the file. The script then:
+
+1. Calls `scanFiles()` and validates the selected physical acquisition index.
+2. Loads the scan and its assigned `NoProbe`, `OnlyProbe`, and `Dark`
+   acquisitions.
+3. Normalizes the backgrounds using `roiBG`, forms the differential image, and
+   applies the regions in `maskBS`.
+4. Displays the corrected detector image.
+5. Calculates each detector pixel's scattering vector in the sample coordinate
+   system:
+
+   ```python
+   Q = 2 * np.pi / LAMBDA * (S_f - S_i)
+   ```
+
+6. Optionally displays the detector surface in three-dimensional reciprocal
+   space when `Q3D_PLOT = True`. `Q3D_STEP` controls the pixel subsampling used
+   to keep that plot responsive.
+7. Rebins the valid intensities onto a regular Qx/Qy grid and plots the mean
+   intensity in each occupied bin. `Q_SPACE_BINS_MAX` sets the maximum number
+   of square reciprocal-space bins along the projection's longer dimension;
+   empty bins remain undefined rather than being displayed as zero intensity.
+
+Reciprocal-space axes are displayed in nm^-1. Under the coordinate convention
+used by the script, increasing detector column primarily maps toward decreasing
+Qx, while increasing detector row maps toward increasing Qy. Since the detector
+image is displayed with its origin at the top, the Qx/Qy projection naturally
+appears horizontally and vertically flipped relative to that image.
+
+Matplotlib displays are sequential. Close the detector-image window to continue
+to the optional 3D view and the binned Qx/Qy plot.
+
 ## Repository files
 
+- `analysis.py` — detector correction and reciprocal-space analysis workflow.
 - `fileScan.py` — reusable discovery, validation, grouping, and reporting logic.
-- `analysis.py` — example selection and background-subtraction workflow.
-- `detector_transform.py` — detector-image correction and reciprocal-space
-  transformation work.
 
 ## AI-assisted development
 
