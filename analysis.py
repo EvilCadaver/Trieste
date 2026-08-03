@@ -218,5 +218,9 @@ R = (
     + dv[..., None] * e_v
 )
 
-Sf = R / np.linalg.norm(R, axis=-1, keepdims=True)
-
+# Scattering vectors' coordinates
+S_f = R / np.linalg.norm(R, axis=-1, keepdims=True)
+# Incident beam coordinates
+S_i = np.array([np.cos(ALPHA), 0.0, np.sin(ALPHA)])
+# Reciprocal coordinates of the detector pixcels
+Q = 2*np.pi/LAMBDA*(S_f - S_i)
