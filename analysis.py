@@ -2,6 +2,7 @@ import h5py
 from fileScan import scanFiles
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.ndimage import gaussian_filter
 
 ## Scan specific settings
 # Data folder location
@@ -52,8 +53,11 @@ Q3D_PLOT = False
 # Plot every fourth pixel to keep the interactive 3D plot responsive.
 Q3D_STEP = 4
 
+## Q-space plot settings
 # Maximum number of reciprocal-space bins along the longer Qx/Qy dimension.
 Q_SPACE_BINS_MAX = 512
+# Gaussian smoothing, used only for second plot display, set to 0 to disable
+Q_SPACE_SMOOTHING_SIGMA = 0  # In Q-space bins
 
 ## Calling the folder scanning function
 results = scanFiles(
@@ -198,7 +202,7 @@ plt.xlabel("Detector column")
 plt.ylabel("Detector row")
 plt.title(f"Scan {scanNo}, data batch {dataIndex}, delay = {delayScan} ps")
 plt.colorbar(label="Intensity")
-plt.show(block=True)
+plt.show(block=False)
 
 if alignMasks:
     exit()
@@ -252,11 +256,11 @@ if Q3D_PLOT:
     intensity = i_plot[valid]
 
     # Symmetric colour scale suitable for differential intensity.
-    colour_limit = np.percentile(np.abs(intensity), 99)
+    colourLimit = np.percentile(np.abs(intensity), 99)
     norm = TwoSlopeNorm(
-        vmin=-colour_limit,
+        vmin=-colourLimit,
         vcenter=0.0,
-        vmax=colour_limit,
+        vmax=colourLimit,
     )
 
     fig = plt.figure(figsize=(10, 8))
@@ -279,8 +283,8 @@ if Q3D_PLOT:
     ax.set_title(f"Scan {dataIndex}, delay = {delayScan} ps")
 
     # Preserve the relative scale of the reciprocal-space axes.
-    axis_ranges = np.ptp(q_points, axis=0)
-    ax.set_box_aspect(np.maximum(axis_ranges, 1e-12))
+    axisRanges = np.ptp(q_points, axis=0)
+    ax.set_box_aspect(np.maximum(axisRanges, 1e-12))
 
     fig.colorbar(dots, ax=ax, pad=0.12, label="Intensity")
     plt.tight_layout()
@@ -294,68 +298,90 @@ valid = (
 )
 
 # Q is calculated in m^-1; use nm^-1 for plotting.
-qx_values = Q[..., 0][valid] * 1e-9
-qy_values = Q[..., 1][valid] * 1e-9
-intensity_values = image[valid]
+qxValues = Q[..., 0][valid] * 1e-9
+qyValues = Q[..., 1][valid] * 1e-9
+intensityValues = image[valid]
 
-qx_min, qx_max = qx_values.min(), qx_values.max()
-qy_min, qy_max = qy_values.min(), qy_values.max()
-qx_span = qx_max - qx_min
-qy_span = qy_max - qy_min
+qxMin, qxMax = qxValues.min(), qxValues.max()
+qyMin, qyMax = qyValues.min(), qyValues.max()
+qxSpan = qxMax - qxMin
+qySpan = qyMax - qyMin
 
 if Q_SPACE_BINS_MAX < 1:
     raise ValueError("Q_SPACE_BINS_MAX must be a positive integer")
 
 # Use square reciprocal-space bins. The longer dimension has at most
 # Q_SPACE_BINS_MAX bins; the shorter dimension is scaled proportionally.
-dq = max(qx_span, qy_span) / Q_SPACE_BINS_MAX
+dq = max(qxSpan, qySpan) / Q_SPACE_BINS_MAX
 if not np.isfinite(dq) or dq <= 0:
     raise ValueError("The Qx/Qy projection has no finite reciprocal-space extent")
 
-qx_bin_count = min(Q_SPACE_BINS_MAX, max(1, int(np.ceil(qx_span / dq))))
-qy_bin_count = min(Q_SPACE_BINS_MAX, max(1, int(np.ceil(qy_span / dq))))
-qx_edges = qx_min + np.arange(qx_bin_count + 1) * dq
-qy_edges = qy_min + np.arange(qy_bin_count + 1) * dq
+qxBinCount = min(Q_SPACE_BINS_MAX, max(1, int(np.ceil(qxSpan / dq))))
+qyBinCount = min(Q_SPACE_BINS_MAX, max(1, int(np.ceil(qySpan / dq))))
+qxEdges = qxMin + np.arange(qxBinCount + 1) * dq
+qyEdges = qyMin + np.arange(qyBinCount + 1) * dq
 
-intensity_sum, _, _ = np.histogram2d(
-    qx_values,
-    qy_values,
-    bins=(qx_edges, qy_edges),
-    weights=intensity_values,
+intensitySum, _, _ = np.histogram2d(
+    qxValues,
+    qyValues,
+    bins=(qxEdges, qyEdges),
+    weights=intensityValues,
 )
-pixel_count, _, _ = np.histogram2d(
-    qx_values,
-    qy_values,
-    bins=(qx_edges, qy_edges),
+pixelCount, _, _ = np.histogram2d(
+    qxValues,
+    qyValues,
+    bins=(qxEdges, qyEdges),
 )
 
 # Average the intensities of all detector pixels assigned to each Q-space bin.
-intensity_qx_qy = np.divide(
-    intensity_sum,
-    pixel_count,
-    out=np.full_like(intensity_sum, np.nan),
-    where=pixel_count > 0,
+intensityQxQy = np.divide(
+    intensitySum,
+    pixelCount,
+    out=np.full_like(intensitySum, np.nan),
+    where=pixelCount > 0,
 )
 
-finite_intensity = intensity_qx_qy[np.isfinite(intensity_qx_qy)]
-if finite_intensity.size == 0:
+finiteIntensity = intensityQxQy[np.isfinite(intensityQxQy)]
+if finiteIntensity.size == 0:
     raise ValueError("No detector intensities were assigned to the Qx/Qy grid")
 
 # A symmetric scale represents positive and negative differential intensities
 # while reducing the influence of isolated extreme pixels.
-colour_limit = np.percentile(np.abs(finite_intensity), 99)
-if colour_limit == 0:
-    colour_limit = 1.0
+colourLimit = np.percentile(np.abs(finiteIntensity), 99)
+if colourLimit == 0:
+    colourLimit = 1.0
 
+if Q_SPACE_SMOOTHING_SIGMA > 0:
+    smoothedSum = gaussian_filter(
+        intensitySum,
+        sigma=Q_SPACE_SMOOTHING_SIGMA,
+    )
+    smoothedCount = gaussian_filter(
+        pixelCount,
+        sigma=Q_SPACE_SMOOTHING_SIGMA,
+    )
+
+    intensityQxQySmoothed = np.divide(
+        smoothedSum,
+        smoothedCount,
+        out=np.full_like(smoothedSum, np.nan),
+        where=smoothedCount > 0,
+    )
+
+    # Do not invent data outside the measured projection.
+    intensityQxQySmoothed[pixelCount == 0] = np.nan
+else:
+    intensityQxQySmoothed = intensityQxQy
+    
 fig, ax = plt.subplots(figsize=(9, 7))
 q_space_plot = ax.pcolormesh(
-    qx_edges,
-    qy_edges,
-    intensity_qx_qy.T,
+    qxEdges,
+    qyEdges,
+    intensityQxQySmoothed.T,
     shading="flat",
     cmap="seismic",
-    vmin=-colour_limit,
-    vmax=colour_limit,
+    vmin=-colourLimit,
+    vmax=colourLimit,
 )
 
 ax.set_aspect("equal", adjustable="box")
