@@ -47,6 +47,11 @@ roiBG = np.s_[400:450, 160:210]
 ## Masking regions, will be added to the empty mask, add rectangles as np.s_[y0:y1,x0:x1] to the list [ ] structure.
 maskBS = [np.s_[379:647,0:222], np.s_[511:1024,29:120]]
 
+## Plot Q space in 3D
+Q3D_PLOT = False
+# Plot every fourth pixel to keep the interactive 3D plot responsive.
+Q3D_STEP = 4
+
 ## Calling the folder scanning function
 results = scanFiles(
     folderData=folderData,
@@ -168,8 +173,9 @@ if alignMasks:
     vmax = valid.max()
     
 else:
+    ## Background levelling
     levelBG = np.median(image[roiBG])
-    image = (image.astype(np.float64) - levelBG) * maskBeamStop
+    image = (image - levelBG) * maskBeamStop
     valid = image[maskBeamStop & np.isfinite(image)]
     vmin = 0.1 * valid.min()
     vmax = 0.1 * valid.max()
@@ -224,3 +230,56 @@ S_f = R / np.linalg.norm(R, axis=-1, keepdims=True)
 S_i = np.array([np.cos(ALPHA), 0.0, np.sin(ALPHA)])
 # Reciprocal coordinates of the detector pixcels
 Q = 2*np.pi/LAMBDA*(S_f - S_i)
+
+## Plotting q space in 3D if Q3D_PLOT == True
+if Q3D_PLOT:
+    from matplotlib.colors import TwoSlopeNorm
+
+    q_plot = Q[::Q3D_STEP, ::Q3D_STEP] * 1e-9  # Convert m^-1 to nm^-1
+    i_plot = image[::Q3D_STEP, ::Q3D_STEP]
+    mask_plot = maskBeamStop[::Q3D_STEP, ::Q3D_STEP]
+
+    valid = (
+        mask_plot
+        & np.isfinite(i_plot)
+        & np.all(np.isfinite(q_plot), axis=-1)
+    )
+
+    q_points = q_plot[valid]
+    intensity = i_plot[valid]
+
+    # Symmetric colour scale suitable for differential intensity.
+    colour_limit = np.percentile(np.abs(intensity), 99)
+    norm = TwoSlopeNorm(
+        vmin=-colour_limit,
+        vcenter=0.0,
+        vmax=colour_limit,
+    )
+
+    fig = plt.figure(figsize=(10, 8))
+    ax = fig.add_subplot(111, projection="3d")
+
+    dots = ax.scatter(
+        q_points[:, 0],
+        q_points[:, 1],
+        q_points[:, 2],
+        c=intensity,
+        cmap="RdBu_r",
+        norm=norm,
+        s=2,
+        linewidths=0,
+    )
+
+    ax.set_xlabel(r"$Q_x$ (nm$^{-1}$)")
+    ax.set_ylabel(r"$Q_y$ (nm$^{-1}$)")
+    ax.set_zlabel(r"$Q_z$ (nm$^{-1}$)")
+    ax.set_title(f"Scan {dataIndex}, delay = {delayScan} ps")
+
+    # Preserve the relative scale of the reciprocal-space axes.
+    axis_ranges = np.ptp(q_points, axis=0)
+    ax.set_box_aspect(np.maximum(axis_ranges, 1e-12))
+
+    fig.colorbar(dots, ax=ax, pad=0.12, label="Intensity")
+    plt.tight_layout()
+    plt.show()
+
