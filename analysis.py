@@ -353,7 +353,7 @@ q_space_plot = ax.pcolormesh(
     qy_edges,
     intensity_qx_qy.T,
     shading="flat",
-    cmap="RdBu_r",
+    cmap="seismic",
     vmin=-colour_limit,
     vmax=colour_limit,
 )
