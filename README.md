@@ -28,6 +28,18 @@ files and require a suitable MATLAB installation.
 
 ## Expected data layout
 
+> [!IMPORTANT]
+> Change `folderData` in `analysis.py` to the directory where the scans for
+> your proposal are stored. At EIS-Timer, this will normally follow the UNC
+> path pattern
+> `//online4eis.esce.elettra.trieste.it/store/eis-timer/%ProposalNo%`, where
+> `%ProposalNo%` is the eight-digit proposal number beginning with the
+> four-digit year (`YYYYNNNN`). For example:
+>
+> ```python
+> folderData = r"//online4eis.esce.elettra.trieste.it/store/eis-timer/20251234"
+> ```
+
 For a sample called `FeRh_A04` and scan number `68`, the scanner expects:
 
 ```text
@@ -72,7 +84,7 @@ Import `scanFiles` into another script located in the same directory:
 from fileScan import scanFiles
 
 results = scanFiles(
-    folderData=r"C:/git/Trieste/Data",
+    folderData=r"//online4eis.esce.elettra.trieste.it/store/eis-timer/20251234",
     sampleName="FeRh_A04",
     scanNames=["Scan", "", "NoProbe", "OnlyProbe", "Dark"],
     scanNo=68,
