@@ -11,7 +11,7 @@ sampleName = "FeRh_A04"
 # Scan specific names: 0) Scan name; 1) Data aqusition name; 2) Background 1 acqusition name; 3) Background 2 acquistion name; 4) Background 3 acqusition name
 scanNames = ["Scan", "", "NoProbe", "OnlyProbe", "Dark"]
 # Scan number chosen for analysis
-scanNo = 68
+scanNo = 31
 # File size ratio for scan batches rejection
 minimumFileSizeRatio = 0.95
 # Verbose reporting on file scan results
@@ -196,7 +196,7 @@ plt.imshow(
 
 plt.xlabel("Detector column")
 plt.ylabel("Detector row")
-plt.title(f"Scan {dataIndex}, delay = {delayScan} ps")
+plt.title(f"Scan {scanNo}, data batch {dataIndex}, delay = {delayScan} ps")
 plt.colorbar(label="Intensity")
 plt.show(block=True)
 
@@ -361,7 +361,7 @@ q_space_plot = ax.pcolormesh(
 ax.set_aspect("equal", adjustable="box")
 ax.set_xlabel(r"$Q_x$ (nm$^{-1}$)")
 ax.set_ylabel(r"$Q_y$ (nm$^{-1}$)")
-ax.set_title(f"Scan {dataIndex}, delay = {delayScan} ps")
+ax.set_title(f"Scan {scanNo}, data batch {dataIndex}, delay = {delayScan} ps")
 fig.colorbar(q_space_plot, ax=ax, label="Mean intensity per bin")
 fig.tight_layout()
 plt.show()
