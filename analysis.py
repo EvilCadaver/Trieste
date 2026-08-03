@@ -12,7 +12,7 @@ sampleName = "FeRh_A04"
 # Scan specific names: 0) Scan name; 1) Data aqusition name; 2) Background 1 acqusition name; 3) Background 2 acquistion name; 4) Background 3 acqusition name
 scanNames = ["Scan", "", "NoProbe", "OnlyProbe", "Dark"]
 # Scan number chosen for analysis
-scanNo = 31
+scanNo = 68
 # File size ratio for scan batches rejection
 minimumFileSizeRatio = 0.95
 # Verbose reporting on file scan results
@@ -25,7 +25,7 @@ h5DelayPath = "/photon_source/SeedLaser/Delay_line_2"
 # Delay zero setting
 delayZero = -3096.49
 # Single scan index to analyse
-dataIndex = 40
+dataIndex = 43
 
 ## Scan measurement parameters
 N_BINN = 2                      #Binning of the detector
