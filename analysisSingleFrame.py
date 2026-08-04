@@ -59,9 +59,9 @@ plotProfileAngles = True
 # Choose the highlight colour
 plotProfileAnglesColour = r"green"
 # Angle from Qx in deg
-ZETTA = 45
+ZETA = 45
 # Acceptance angle in deg
-D_ZETTA = 20
+D_ZETA = 20
 # Symmetry
 ZETTA_SYMMETRY = 4
 # Radial step bin
@@ -164,7 +164,7 @@ if plotProfileAngles:
     angleDifference = (
         (
             angleGrid
-            - ZETTA
+            - ZETA
             + symmetryPeriod / 2
         )
         % symmetryPeriod
@@ -172,7 +172,7 @@ if plotProfileAngles:
     )
 
     profileMask = (
-        np.abs(angleDifference) <= D_ZETTA / 2
+        np.abs(angleDifference) <= D_ZETA / 2
     ) & np.isfinite(intensityQxQy)
 
     acceptedOverlay = np.ma.masked_where(
@@ -200,9 +200,9 @@ distance, sumIntensity = createRadialIntensityProfile(
     qxCenters=qxCenters,
     qyCenters=qyCenters,
     intensity=intensityQxQy,
-    ZETTA=ZETTA,
-    D_ZETTA=D_ZETTA,
-    ZETTA_SYMMETRY=ZETTA_SYMMETRY,
+    ZETA=ZETA,
+    D_ZETA=D_ZETA,
+    ZETA_SYMMETRY=ZETTA_SYMMETRY,
     RADIAL_STEP_BIN=RADIAL_STEP_BIN,
 )
 
@@ -211,8 +211,8 @@ axProfile.plot(distance, sumIntensity)
 axProfile.set_xlabel(r"$|Q|$ (nm$^{-1}$)")
 axProfile.set_ylabel("Summed intensity")
 axProfile.set_title(
-    f"Zetta={ZETTA} deg, symmetry={ZETTA_SYMMETRY}, "
-    f"acceptance={D_ZETTA} deg"
+    f"Zetta={ZETA} deg, symmetry={ZETTA_SYMMETRY}, "
+    f"acceptance={D_ZETA} deg"
 )
 axProfile.grid(True, alpha=0.3)
 
