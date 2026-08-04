@@ -88,7 +88,7 @@ def saveQDelayData(
         for name, value in metadata:
             writer.writerow([name, formatSetting(value)])
 
-        writer.writerow([])
+        writer.writerow(["***DATA***"])
         writer.writerow(["Q", "dt", "Intensity"])
         writer.writerow(["nm^-1", "ps", "a.u."])
 
@@ -619,13 +619,28 @@ nominalDelayStep = None
 if uniqueDelays.size == 0:
     raise RuntimeError("No finite delay values were available for export")
 
-# Use exactly one acquisition for every measured delay. The first physical
-# scan wins even if its profile is NaN because it was excluded or unusable;
-# later duplicates are not allowed to silently replace it.
-keptDataIndexes = np.array(
-    [delayToIndexes[delayScan][0] for delayScan in uniqueDelays],
-    dtype=int,
-)
+# Select which physical acquisitions construct the final figure and CSV.
+# Each future duplicate-handling rule should define all three values below.
+match handlingDuplicateDelays:
+    case "keep first":
+        # The first physical scan wins even if its profile is NaN because it
+        # was excluded or unusable. A later duplicate cannot replace it.
+        figureDelays = uniqueDelays.copy()
+        keptDataIndexes = np.array(
+            [delayToIndexes[delayScan][0] for delayScan in figureDelays],
+            dtype=int,
+        )
+        discardedDuplicateIndexes = sorted(
+            dataIndex
+            for dataIndexes in duplicateDelays.values()
+            for dataIndex in dataIndexes[1:]
+        )
+    case _:
+        raise ValueError(
+            "Unknown handlingDuplicateDelays value "
+            f"{handlingDuplicateDelays!r}. Available choice: 'keep first'"
+        )
+
 figureIntensityProfiles = intensityProfiles[:, keptDataIndexes]
 
 if uniqueDelays.size > 1:
@@ -743,7 +758,7 @@ if profileLimit == 0:
     profileLimit = 1.0
 
 heatmapProfiles = axProfiles.pcolormesh(
-    uniqueDelays,
+    figureDelays,
     profileDistance,
     figureIntensityProfiles,
     shading="nearest",
@@ -770,11 +785,6 @@ lastUsedIndex = int(np.max(keptDataIndexes))
 firstUsedFile = Path(allDataFiles[firstUsedIndex])
 lastUsedFile = Path(allDataFiles[lastUsedIndex])
 outputPath = folderOutput / f"{sampleName}_Scan_{scanNo:03d}_Q_vs_delay.csv"
-discardedDuplicateIndexes = sorted(
-    dataIndex
-    for dataIndexes in duplicateDelays.values()
-    for dataIndex in dataIndexes[1:]
-)
 brokenDataIndexes = [
     dataIndex
     for dataIndex, dataFilePath in enumerate(allDataFiles)
@@ -793,7 +803,7 @@ metadata = [
     ("Last data batch physical index", lastUsedIndex),
     ("Last data batch file", lastUsedFile),
     ("Last data batch file modification time", fileModificationTime(lastUsedFile)),
-    ("Duplicate-delay handling", "keep first physical scan"),
+    ("handlingDuplicateDelays", handlingDuplicateDelays),
     ("Physical data indexes represented", keptDataIndexes.tolist()),
     ("Discarded duplicate physical indexes", discardedDuplicateIndexes),
     ("Broken physical data indexes", brokenDataIndexes),
@@ -835,7 +845,7 @@ metadata = [
 delimiter = saveQDelayData(
     outputPath=outputPath,
     qValues=profileDistance,
-    delayValues=uniqueDelays,
+    delayValues=figureDelays,
     intensityValues=figureIntensityProfiles,
     metadata=metadata,
 )
