@@ -1,0 +1,503 @@
+from fileScan import scanFiles
+from qSpaceFunctions import (
+    createQSpaceMap,
+    createRadialIntensityProfile,
+    subtractPolynomialBackground,
+)
+import h5py
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+
+def moveFigure(fig, x, y):
+    """Move a Matplotlib figure window to screen position (x, y)."""
+    window = getattr(fig.canvas.manager, "window", None)
+
+    if window is None:
+        return
+
+    if hasattr(window, "move"):          # Qt backend
+        window.move(x, y)
+    elif hasattr(window, "wm_geometry"):  # Tk backend
+        window.wm_geometry(f"+{x}+{y}")
+    else:
+        print("Current Matplotlib backend does not support window positioning")
+
+
+def readDelay(dataFilePath, h5DelayPath, delayZero):
+    """Read the delay even for scans that will not undergo image analysis."""
+    with h5py.File(dataFilePath, "r") as h5:
+        delayValue = np.asarray(h5[h5DelayPath][...]).squeeze()
+
+    if delayValue.size != 1:
+        raise ValueError(
+            f"Expected one delay value in {dataFilePath}, "
+            f"received shape {delayValue.shape}"
+        )
+
+    return round(float(-delayValue + delayZero), 1)
+
+## Scan specific settings
+# Data folder location
+folderData = r"C:/git/Trieste/Data"
+# Sample name / subfolder in folderData
+sampleName = "FeRh_A04"
+# Scan specific names: 0) Scan name; 1) Data aqusition name; 2) Background 1 acqusition name; 3) Background 2 acquistion name; 4) Background 3 acqusition name
+scanNames = ["Scan", "", "NoProbe", "OnlyProbe", "Dark"]
+# Scan number chosen for analysis
+scanNo = 68
+# File size ratio for scan batches rejection
+minimumFileSizeRatio = 0.95
+# Verbose reporting on file scan results
+verbose = False
+
+## Single file analysis for now
+## HDF5 package paths
+h5CCDImagePath = "/CCD/Image"
+h5DelayPath = "/photon_source/SeedLaser/Delay_line_2"
+# Delay zero setting
+delayZero = -3096.49
+# Data indexes to exclude
+dataIndexesExcluded = [45, 46, 47, 48, 49]
+
+## Scan measurement parameters
+N_BINN = 2                      #Binning of the detector
+PIXEL_SIZE = N_BINN * 13.5e-6   #Pixel edge length, m
+LAMBDA = 23.5e-9                #Wavelength, m
+CY0 = 511                       #Reflection centre Y, pixels
+CX0 = 15                        #Reflection centre X, pixels
+DCCD = 67e-3                    #Shortest distance from the incident point on the sample to the detector, m 
+ALPHA = 17 /180*np.pi           #Incidence beam angle, rad
+OMEGA = 16.5 /180*np.pi         #Angle between scattered beam maximum and the detector normal (positive towards the sample surface), rad
+
+## Masks allignemnt
+# Make true for masks allignment
+alignMasks = False
+# Limit the region to show during masks allignment
+roiAllignMasks = np.s_[400:600, 0:220]
+
+# ROI for the background zero substraction
+roiBG = np.s_[400:450, 160:210] 
+
+## Masking regions, will be added to the empty mask, add rectangles as np.s_[y0:y1,x0:x1] to the list [ ] structure.
+maskBS = [np.s_[379:647,0:222], np.s_[511:1024,29:120]]
+
+## Q-space plot settings
+# Maximum number of reciprocal-space bins along the longer Qx/Qy dimension.
+Q_SPACE_BINS_MAX = 512
+
+## Q-space analysis
+# Show angles chosen for integration
+plotProfileAngles = True
+# Choose the highlight colour
+plotProfileAnglesColour = r"green"
+# Angle from Qx in deg
+ZETA = 45
+# Acceptance angle in deg
+D_ZETA = 20
+# Symmetry
+ZETA_SYMMETRY = 4
+# Radial step bin
+RADIAL_STEP_BIN = 1
+# Q-distance cutoffs in percent
+Q_LOW_CUTOFF = 15
+Q_HIGH_CUTOFF = 90
+# Polynomial background fitted only after applying both Q cutoffs
+BACKGROUND_NPOLY = 3
+
+## Calling the folder scanning function
+results = scanFiles(
+    folderData=folderData,
+    sampleName=sampleName,
+    scanNames=scanNames,
+    scanNo=scanNo,
+    verbose=verbose,
+    minimumFileSizeRatio=minimumFileSizeRatio,
+)
+
+if alignMasks:
+    raise ValueError(
+        "Multi-frame profile analysis requires alignMasks=False"
+    )
+
+allDataFiles = results["allDataFiles"]
+numberOfScans = len(allDataFiles)
+excludedIndexes = set(dataIndexesExcluded)
+
+invalidExcludedIndexes = sorted(
+    index
+    for index in excludedIndexes
+    if not isinstance(index, (int, np.integer))
+    or isinstance(index, (bool, np.bool_))
+    or index < 0
+    or index >= numberOfScans
+)
+if invalidExcludedIndexes:
+    raise ValueError(
+        "dataIndexesExcluded contains invalid physical scan indexes: "
+        f"{invalidExcludedIndexes}"
+    )
+
+# Read delays before processing so excluded and broken scans retain their proper
+# columns in the final map. A missing delay is kept as NaN and labelled as such.
+delayScans = np.full(numberOfScans, np.nan)
+for dataIndex, dataFilePath in enumerate(allDataFiles):
+    try:
+        delayScans[dataIndex] = readDelay(
+            dataFilePath,
+            h5DelayPath,
+            delayZero,
+        )
+    except (KeyError, OSError, ValueError) as error:
+        print(f"Data [{dataIndex}] delay unavailable: {error}")
+
+distance = None
+profileDistance = None
+intensityProfiles = None
+qxReference = None
+qyReference = None
+
+figQspace = None
+figProfile = None
+figProfiles = None
+heatmapQspace = None
+lineProfile = None
+lineBackground = None
+lineCorrectedProfile = None
+heatmapProfiles = None
+
+# The accumulated map uses one equally wide column per physical scan index.
+# Delay values are displayed as tick labels. This keeps repeated delays and
+# invalid scans as separate columns instead of merging or hiding them.
+scanColumns = np.arange(numberOfScans)
+tickCount = min(12, numberOfScans)
+tickIndexes = np.unique(
+    np.linspace(0, numberOfScans - 1, tickCount, dtype=int)
+)
+
+plt.ion()
+
+for dataIndex, dataFilePath in enumerate(allDataFiles):
+    skippedReason = None
+
+    if dataIndex in excludedIndexes:
+        skippedReason = "explicitly excluded"
+    elif dataFilePath in results["brokenFiles"]:
+        skippedReason = "broken scan"
+    elif dataFilePath in results["filesWithoutBackground"]:
+        skippedReason = "no suitable background set"
+
+    if skippedReason is None:
+        try:
+            (
+                qxCenters,
+                qyCenters,
+                intensityQxQy,
+                delayScan,
+            ) = createQSpaceMap(
+                results=results,
+                h5CCDImagePath=h5CCDImagePath,
+                h5DelayPath=h5DelayPath,
+                delayZero=delayZero,
+                dataIndex=dataIndex,
+                PIXEL_SIZE=PIXEL_SIZE,
+                LAMBDA=LAMBDA,
+                CY0=CY0,
+                CX0=CX0,
+                DCCD=DCCD,
+                ALPHA=ALPHA,
+                OMEGA=OMEGA,
+                alignMasks=False,
+                roiAllignMasks=roiAllignMasks,
+                roiBG=roiBG,
+                maskBS=maskBS,
+                Q_SPACE_BINS_MAX=Q_SPACE_BINS_MAX,
+            )
+
+            currentDistance, sumIntensity = createRadialIntensityProfile(
+                qxCenters=qxCenters,
+                qyCenters=qyCenters,
+                intensity=intensityQxQy,
+                ZETA=ZETA,
+                D_ZETA=D_ZETA,
+                ZETA_SYMMETRY=ZETA_SYMMETRY,
+                RADIAL_STEP_BIN=RADIAL_STEP_BIN,
+            )
+
+            (
+                currentCutoffMask,
+                backgroundIntensity,
+                correctedIntensity,
+                qLow,
+                qHigh,
+            ) = subtractPolynomialBackground(
+                distance=currentDistance,
+                intensity=sumIntensity,
+                Q_LOW_CUTOFF=Q_LOW_CUTOFF,
+                Q_HIGH_CUTOFF=Q_HIGH_CUTOFF,
+                BACKGROUND_NPOLY=BACKGROUND_NPOLY,
+            )
+        except (KeyError, OSError, ValueError) as error:
+            skippedReason = f"processing failed: {error}"
+
+    if skippedReason is not None:
+        print(
+            f"Data [{dataIndex}] at delay {delayScans[dataIndex]:g} ps: "
+            f"{skippedReason}; storing NaN"
+        )
+
+        # Once plotting has been initialized, blank the per-scan displays so a
+        # skipped scan is not mistaken for the preceding valid acquisition.
+        if heatmapQspace is not None:
+            heatmapQspace.set_array(
+                np.full(heatmapQspace.get_array().shape, np.nan)
+            )
+            lineProfile.set_ydata(np.full(distance.shape, np.nan))
+            lineBackground.set_ydata(np.full(distance.shape, np.nan))
+            lineCorrectedProfile.set_ydata(
+                np.full(distance.shape, np.nan)
+            )
+            axQspace.set_title(
+                f"Scan {scanNo}, data batch {dataIndex}: {skippedReason}"
+            )
+            axProfile.set_title(
+                f"Data batch {dataIndex}: {skippedReason}"
+            )
+    else:
+        delayScans[dataIndex] = delayScan
+
+        if distance is None:
+            # Geometry and binning settings are constant, so every valid scan
+            # must produce these same axes.
+            distance = currentDistance
+            cutoffMask = currentCutoffMask
+            profileDistance = distance[cutoffMask]
+            qLowReference = qLow
+            qHighReference = qHigh
+            qxReference = qxCenters
+            qyReference = qyCenters
+            intensityProfiles = np.full(
+                (profileDistance.size, numberOfScans),
+                np.nan,
+            )
+
+            finiteIntensity = intensityQxQy[np.isfinite(intensityQxQy)]
+            colourLimit = np.percentile(np.abs(finiteIntensity), 99)
+            if colourLimit == 0:
+                colourLimit = 1.0
+
+            qxSpan = np.ptp(qxCenters)
+            qySpan = np.ptp(qyCenters)
+            longSide = 7.0
+            if qxSpan >= qySpan:
+                plotWidth = longSide
+                plotHeight = longSide * qySpan / qxSpan
+            else:
+                plotHeight = longSide
+                plotWidth = longSide * qxSpan / qySpan
+
+            figQspace, axQspace = plt.subplots(
+                figsize=(plotWidth + 1.2, plotHeight),
+                layout="constrained",
+            )
+            heatmapQspace = axQspace.pcolormesh(
+                qxCenters,
+                qyCenters,
+                intensityQxQy,
+                shading="nearest",
+                cmap="seismic",
+                vmin=-colourLimit,
+                vmax=colourLimit,
+            )
+
+            if plotProfileAngles:
+                qxGrid, qyGrid = np.meshgrid(qxCenters, qyCenters)
+                angleGrid = np.degrees(np.arctan2(qyGrid, qxGrid))
+                symmetryPeriod = 360.0 / ZETA_SYMMETRY
+                angleDifference = (
+                    (angleGrid - ZETA + symmetryPeriod / 2)
+                    % symmetryPeriod
+                    - symmetryPeriod / 2
+                )
+                profileMask = (
+                    np.abs(angleDifference) <= D_ZETA / 2
+                ) & np.isfinite(intensityQxQy)
+                acceptedOverlay = np.ma.masked_where(
+                    ~profileMask,
+                    np.ones_like(intensityQxQy),
+                )
+                axQspace.pcolormesh(
+                    qxCenters,
+                    qyCenters,
+                    acceptedOverlay,
+                    shading="nearest",
+                    cmap=ListedColormap([plotProfileAnglesColour]),
+                    alpha=0.25,
+                )
+
+            axQspace.set_aspect("equal", adjustable="box")
+            axQspace.set_xlabel(r"$Q_x$ (nm$^{-1}$)")
+            axQspace.set_ylabel(r"$Q_y$ (nm$^{-1}$)")
+            figQspace.colorbar(
+                heatmapQspace,
+                ax=axQspace,
+                label="Mean intensity per bin",
+            )
+
+            figProfile, axProfile = plt.subplots(layout="constrained")
+            (lineProfile,) = axProfile.plot(
+                distance,
+                sumIntensity,
+                label="Original",
+            )
+            (lineBackground,) = axProfile.plot(
+                distance,
+                backgroundIntensity,
+                label=(
+                    "Background fitted after cutoffs "
+                    f"(order {BACKGROUND_NPOLY})"
+                ),
+            )
+            (lineCorrectedProfile,) = axProfile.plot(
+                distance,
+                correctedIntensity,
+                label="Profile - background",
+            )
+            axProfile.axvline(
+                qLowReference,
+                color="black",
+                linestyle="--",
+                linewidth=1,
+                label=f"Low cutoff ({Q_LOW_CUTOFF:g}%)",
+            )
+            axProfile.axvline(
+                qHighReference,
+                color="black",
+                linestyle=":",
+                linewidth=1,
+                label=f"High cutoff ({Q_HIGH_CUTOFF:g}%)",
+            )
+            axProfile.set_xlabel(r"$|Q|$ (nm$^{-1}$)")
+            axProfile.set_ylabel("Summed intensity")
+            axProfile.grid(True, alpha=0.3)
+            axProfile.legend()
+
+            profileCmap = plt.get_cmap("seismic").copy()
+            profileCmap.set_bad("lightgray")
+            radialStep = (
+                profileDistance[1] - profileDistance[0]
+                if profileDistance.size > 1
+                else 1.0
+            )
+            figProfiles, axProfiles = plt.subplots(
+                figsize=(11, 7),
+                layout="constrained",
+            )
+            heatmapProfiles = axProfiles.imshow(
+                intensityProfiles,
+                origin="lower",
+                aspect="auto",
+                interpolation="nearest",
+                extent=[
+                    -0.5,
+                    numberOfScans - 0.5,
+                    profileDistance[0] - radialStep / 2,
+                    profileDistance[-1] + radialStep / 2,
+                ],
+                cmap=profileCmap,
+            )
+            axProfiles.set_xlabel("Delay (ps; one column per physical scan)")
+            axProfiles.set_ylabel(r"$|Q|$ (nm$^{-1}$)")
+            axProfiles.set_xticks(tickIndexes)
+            axProfiles.set_xticklabels(
+                [f"{delayScans[index]:g}" for index in tickIndexes]
+            )
+            figProfiles.colorbar(
+                heatmapProfiles,
+                ax=axProfiles,
+                label="Background-subtracted summed intensity",
+            )
+
+            moveFigure(figQspace, 20, 100)
+            moveFigure(figProfile, 600, 100)
+            moveFigure(figProfiles, 1300, 100)
+        else:
+            if not (
+                np.array_equal(qxCenters.shape, qxReference.shape)
+                and np.array_equal(qyCenters.shape, qyReference.shape)
+                and np.allclose(qxCenters, qxReference)
+                and np.allclose(qyCenters, qyReference)
+                and currentDistance.shape == distance.shape
+                and np.allclose(currentDistance, distance)
+                and np.array_equal(currentCutoffMask, cutoffMask)
+                and np.isclose(qLow, qLowReference)
+                and np.isclose(qHigh, qHighReference)
+            ):
+                raise ValueError(
+                    f"Data [{dataIndex}] produced incompatible Q/profile axes"
+                )
+
+            heatmapQspace.set_array(intensityQxQy.ravel())
+            finiteIntensity = intensityQxQy[np.isfinite(intensityQxQy)]
+            colourLimit = np.percentile(np.abs(finiteIntensity), 99)
+            if colourLimit == 0:
+                colourLimit = 1.0
+            heatmapQspace.set_clim(-colourLimit, colourLimit)
+            lineProfile.set_ydata(sumIntensity)
+            lineBackground.set_ydata(backgroundIntensity)
+            lineCorrectedProfile.set_ydata(correctedIntensity)
+
+        intensityProfiles[:, dataIndex] = correctedIntensity[cutoffMask]
+        axQspace.set_title(
+            f"Scan {scanNo}, data batch {dataIndex}, "
+            f"delay={delayScan:g} ps"
+        )
+        axProfile.set_title(
+            f"Zetta={ZETA:g} deg, symmetry={ZETA_SYMMETRY}, "
+            f"acceptance={D_ZETA:g} deg, delay={delayScan:g} ps"
+        )
+        axProfile.relim()
+        axProfile.autoscale_view()
+
+    if heatmapProfiles is not None:
+        heatmapProfiles.set_data(intensityProfiles)
+        finiteProfiles = intensityProfiles[np.isfinite(intensityProfiles)]
+        if finiteProfiles.size:
+            profileLimit = np.percentile(np.abs(finiteProfiles), 99)
+            if profileLimit == 0:
+                profileLimit = 1.0
+            heatmapProfiles.set_clim(-profileLimit, profileLimit)
+
+        axProfiles.set_title(
+            f"Scan {scanNo}: processed through data batch {dataIndex} "
+            f"of {numberOfScans - 1}"
+        )
+
+        if getattr(figProfiles.canvas.manager, "window", None) is not None:
+            for figure in (figQspace, figProfile, figProfiles):
+                figure.canvas.draw_idle()
+                figure.canvas.flush_events()
+            plt.pause(0.001)
+
+if intensityProfiles is None:
+    raise RuntimeError("No valid scans were available for profile analysis")
+
+validScanCount = np.count_nonzero(
+    np.any(np.isfinite(intensityProfiles), axis=0)
+)
+print(
+    f"Finished: {validScanCount} valid profiles, "
+    f"{numberOfScans - validScanCount} NaN scan columns"
+)
+
+axProfiles.set_title(
+    f"Scan {scanNo}: background-subtracted profiles versus delay"
+)
+plt.ioff()
+
+# Desktop backends expose a window and should remain open after processing.
+# Headless backends (used for automated validation) have nothing to display.
+if getattr(figProfiles.canvas.manager, "window", None) is None:
+    plt.close("all")
+else:
+    plt.show()

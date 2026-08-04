@@ -264,9 +264,9 @@ def createRadialIntensityProfile(
     qxCenters,
     qyCenters,
     intensity,
-    ZETTA,
-    D_ZETTA,
-    ZETTA_SYMMETRY,
+    ZETA,
+    D_ZETA,
+    ZETA_SYMMETRY,
     RADIAL_STEP_BIN,
 ):
     """Sum intensity versus distance inside symmetry-related angular sectors.
@@ -294,10 +294,10 @@ def createRadialIntensityProfile(
             f"intensity must have shape {expectedShape}, "
             f"received {intensity.shape}"
         )
-    if not isinstance(ZETTA_SYMMETRY, (int, np.integer)):
-        raise TypeError("ZETTA_SYMMETRY must be an integer")
-    if ZETTA_SYMMETRY < 1:
-        raise ValueError("ZETTA_SYMMETRY must be at least 1")
+    if not isinstance(ZETA_SYMMETRY, (int, np.integer)):
+        raise TypeError("ZETA_SYMMETRY must be an integer")
+    if ZETA_SYMMETRY < 1:
+        raise ValueError("ZETA_SYMMETRY must be at least 1")
     if (
         isinstance(RADIAL_STEP_BIN, (bool, np.bool_))
         or not isinstance(RADIAL_STEP_BIN, (int, np.integer))
@@ -305,24 +305,24 @@ def createRadialIntensityProfile(
         raise TypeError("RADIAL_STEP_BIN must be an integer")
     if RADIAL_STEP_BIN < 1:
         raise ValueError("RADIAL_STEP_BIN must be at least 1")
-    if not np.isfinite(ZETTA) or not np.isfinite(D_ZETTA):
-        raise ValueError("ZETTA and D_ZETTA must be finite")
-    if D_ZETTA <= 0 or D_ZETTA > 360:
-        raise ValueError("D_ZETTA must be greater than 0 and at most 360 degrees")
+    if not np.isfinite(ZETA) or not np.isfinite(D_ZETA):
+        raise ValueError("ZETA and D_ZETTA must be finite")
+    if D_ZETA <= 0 or D_ZETA > 360:
+        raise ValueError("D_ZETA must be greater than 0 and at most 360 degrees")
 
     qxGrid, qyGrid = np.meshgrid(qxCenters, qyCenters)
     distanceGrid = np.hypot(qxGrid, qyGrid)
     angleGrid = np.degrees(np.arctan2(qyGrid, qxGrid))
 
     # Folding by the symmetry period finds the signed angular difference from
-    # the nearest equivalent direction: ZETTA + k*360/ZETTA_SYMMETRY.
-    symmetryPeriod = 360.0 / ZETTA_SYMMETRY
+    # the nearest equivalent direction: ZETA + k*360/ZETA_SYMMETRY.
+    symmetryPeriod = 360.0 / ZETA_SYMMETRY
     angleDifference = (
-        (angleGrid - ZETTA + symmetryPeriod / 2) % symmetryPeriod
+        (angleGrid - ZETA + symmetryPeriod / 2) % symmetryPeriod
         - symmetryPeriod / 2
     )
     accepted = (
-        np.abs(angleDifference) <= D_ZETTA / 2
+        np.abs(angleDifference) <= D_ZETA / 2
     ) & np.isfinite(intensity)
 
     if not np.any(accepted):
@@ -365,6 +365,98 @@ def createRadialIntensityProfile(
     distance = 0.5 * (radialEdges[:-1] + radialEdges[1:])
 
     return distance, sumIntensity
+
+
+def subtractPolynomialBackground(
+    distance,
+    intensity,
+    Q_LOW_CUTOFF,
+    Q_HIGH_CUTOFF,
+    BACKGROUND_NPOLY,
+):
+    """Cut a radial profile, then fit and subtract its polynomial background.
+
+    Cutoffs are first applied as percentages of the complete radial-distance
+    span. The polynomial background is then calculated using only finite
+    intensity points that remain inside that cutoff interval. Returned
+    background and corrected arrays retain the original profile shape, with
+    NaN outside the selected interval. This makes the fitted range explicit and
+    prevents polynomial extrapolation from entering the final analysis.
+    """
+    distance = np.asarray(distance, dtype=float)
+    intensity = np.asarray(intensity, dtype=float)
+
+    if distance.ndim != 1 or intensity.ndim != 1:
+        raise ValueError("distance and intensity must be one-dimensional")
+    if distance.shape != intensity.shape:
+        raise ValueError("distance and intensity must have the same shape")
+    if distance.size < 2:
+        raise ValueError("At least two radial profile points are required")
+    if not np.all(np.isfinite(distance)):
+        raise ValueError("distance must contain only finite values")
+    if not np.all(np.diff(distance) > 0):
+        raise ValueError("distance must be strictly increasing")
+
+    for name, cutoff in (
+        ("Q_LOW_CUTOFF", Q_LOW_CUTOFF),
+        ("Q_HIGH_CUTOFF", Q_HIGH_CUTOFF),
+    ):
+        if (
+            isinstance(cutoff, (bool, np.bool_))
+            or not isinstance(
+                cutoff,
+                (int, float, np.integer, np.floating),
+            )
+        ):
+            raise TypeError(f"{name} must be a finite number")
+        if not np.isfinite(cutoff):
+            raise ValueError(f"{name} must be finite")
+
+    if not 0 <= Q_LOW_CUTOFF < Q_HIGH_CUTOFF <= 100:
+        raise ValueError(
+            "Cutoffs must satisfy "
+            "0 <= Q_LOW_CUTOFF < Q_HIGH_CUTOFF <= 100"
+        )
+    if (
+        isinstance(BACKGROUND_NPOLY, (bool, np.bool_))
+        or not isinstance(BACKGROUND_NPOLY, (int, np.integer))
+    ):
+        raise TypeError("BACKGROUND_NPOLY must be an integer")
+    if BACKGROUND_NPOLY < 0:
+        raise ValueError("BACKGROUND_NPOLY must be non-negative")
+
+    distanceSpan = distance[-1] - distance[0]
+    qLow = distance[0] + Q_LOW_CUTOFF / 100 * distanceSpan
+    qHigh = distance[0] + Q_HIGH_CUTOFF / 100 * distanceSpan
+    cutoffMask = (distance >= qLow) & (distance <= qHigh)
+
+    # The cutoff is deliberately part of fitMask: no profile point below qLow
+    # or above qHigh contributes to the polynomial background calculation.
+    fitMask = cutoffMask & np.isfinite(intensity)
+
+    requiredPointCount = BACKGROUND_NPOLY + 1
+    if np.count_nonzero(fitMask) < requiredPointCount:
+        raise ValueError(
+            f"Polynomial order {BACKGROUND_NPOLY} requires at least "
+            f"{requiredPointCount} finite points inside the cutoff interval"
+        )
+
+    # Polynomial.fit scales the Q domain internally, which is better
+    # conditioned than fitting raw powers of small Q values directly.
+    backgroundModel = np.polynomial.Polynomial.fit(
+        distance[fitMask],
+        intensity[fitMask],
+        deg=BACKGROUND_NPOLY,
+    )
+    background = np.full_like(intensity, np.nan)
+    background[cutoffMask] = backgroundModel(distance[cutoffMask])
+
+    correctedIntensity = np.full_like(intensity, np.nan)
+    correctedIntensity[cutoffMask] = (
+        intensity[cutoffMask] - background[cutoffMask]
+    )
+
+    return cutoffMask, background, correctedIntensity, qLow, qHigh
 
 
 def _readDetectorImage(filePath, h5CCDImagePath):
