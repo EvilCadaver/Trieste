@@ -3,7 +3,6 @@ from qSpaceFunctions import createQSpaceMap, createRadialIntensityProfile
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
-from matplotlib.patches import Patch
 
 ## Scan specific settings
 # Data folder location
@@ -57,6 +56,8 @@ Q_SPACE_BINS_MAX = 512
 ## Q-space analysis
 # Show angles chosen for integration
 plotProfileAngles = True
+# Choose the highlight colour
+plotProfileAnglesColour = r"green"
 # Angle from Qx in deg
 ZETTA = 45
 # Acceptance angle in deg
@@ -184,19 +185,9 @@ if plotProfileAngles:
         qyCenters,
         acceptedOverlay,
         shading="nearest",
-        cmap=ListedColormap(["green"]),
+        cmap=ListedColormap([plotProfileAnglesColour]),
         alpha=0.25,
     )
-
-    # axQspace.legend(
-    #     handles=[
-    #         Patch(
-    #             facecolor="green",
-    #             alpha=0.25,
-    #             label="Included in radial profile",
-    #         )
-    #     ]
-    # )
 
 axQspace.set_title(f"Scan {scanNo}, data batch {dataIndex}, delay = {delayScan} ps")
 axQspace.set_aspect("equal", adjustable="box")
