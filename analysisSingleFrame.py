@@ -63,7 +63,7 @@ ZETA = 45
 # Acceptance angle in deg
 D_ZETA = 20
 # Symmetry
-ZETTA_SYMMETRY = 4
+ZETA_SYMMETRY = 4
 # Radial step bin
 RADIAL_STEP_BIN = 2
 
@@ -159,7 +159,7 @@ if plotProfileAngles:
         np.arctan2(qyGrid, qxGrid)
     )
 
-    symmetryPeriod = 360.0 / ZETTA_SYMMETRY
+    symmetryPeriod = 360.0 / ZETA_SYMMETRY
 
     angleDifference = (
         (
@@ -194,15 +194,15 @@ axQspace.set_aspect("equal", adjustable="box")
 figQspace.colorbar(heatmap, ax=axQspace, label="Mean intensity per bin")
 
 # Sum intensities in radial shells, restricted to the reference direction and
-# all directions related to it by ZETTA_SYMMETRY. D_ZETTA is the complete
-# angular width, so the accepted half-width is D_ZETTA/2 on either side.
+# all directions related to it by ZETA_SYMMETRY. D_ZETA is the complete
+# angular width, so the accepted half-width is D_ZETA/2 on either side.
 distance, sumIntensity = createRadialIntensityProfile(
     qxCenters=qxCenters,
     qyCenters=qyCenters,
     intensity=intensityQxQy,
     ZETA=ZETA,
     D_ZETA=D_ZETA,
-    ZETA_SYMMETRY=ZETTA_SYMMETRY,
+    ZETA_SYMMETRY=ZETA_SYMMETRY,
     RADIAL_STEP_BIN=RADIAL_STEP_BIN,
 )
 
@@ -211,7 +211,7 @@ axProfile.plot(distance, sumIntensity)
 axProfile.set_xlabel(r"$|Q|$ (nm$^{-1}$)")
 axProfile.set_ylabel("Summed intensity")
 axProfile.set_title(
-    f"Zetta={ZETA} deg, symmetry={ZETTA_SYMMETRY}, "
+    f"Zeta={ZETA} deg, symmetry={ZETA_SYMMETRY}, "
     f"acceptance={D_ZETA} deg"
 )
 axProfile.grid(True, alpha=0.3)
