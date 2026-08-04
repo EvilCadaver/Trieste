@@ -280,6 +280,29 @@ def scanFiles(
 
     if verbose:
         _printScanResults(results)
+    else:
+        ## Files scanning short report
+        if referenceFileSize is None:
+            print("No matching HDF5 files found.")
+            exit()
+
+        print(f"Reference file size: {referenceFileSize:.0f} bytes")
+        print(f"Minimum accepted size: {minimumFileSize:.0f} bytes")
+        print(f"Borked files: {len(brokenFiles)}")
+
+        for brokenFile in sorted(brokenFiles):
+            print(f"  {brokenFile}: {fileSizes[brokenFile]} bytes")
+
+        print(
+            f"\nBackground timing windows: "
+            f"{len(backgroundGroups) + len(invalidBackgroundGroups)}"
+        )
+        print(f"Valid background groups: {len(backgroundGroups)}")
+        print(f"Invalid background groups: {len(invalidBackgroundGroups)}")
+        print(
+            "Repaired background groups: "
+            f"{sum(bool(group['rejectedBackgrounds']) for group in backgroundGroups)}"
+        )
 
     return results
 

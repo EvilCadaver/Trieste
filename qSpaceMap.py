@@ -48,10 +48,8 @@ def createQSpaceMap(
         Mean differential intensity with shape
         ``(len(qyCenters), len(qxCenters))``. Empty bins contain NaN.
     """
-    # These settings are part of the caller's complete analysis configuration,
-    # although delay is not needed to calculate the requested three outputs.
-    del h5DelayPath, delayZero
-
+    
+    print(f"Chosen scan index: {dataIndex}")
     if not isinstance(dataIndex, (int, np.integer)):
         raise TypeError("dataIndex must be an integer")
     if dataIndex < 0 or dataIndex >= len(results["allDataFiles"]):
@@ -80,11 +78,19 @@ def createQSpaceMap(
             f"{dataFilePath}"
         )
 
+    print("Scan:", dataFilePath)
+    print("NoProbe:", backgrounds["NoProbe"])
+    print("OnlyProbe:", backgrounds["OnlyProbe"])
+    print("Dark:", backgrounds["Dark"])
+
     # Read and orient all detector images in the same way as analysis.py.
     imageScan = _readDetectorImage(dataFilePath, h5CCDImagePath)
+    with h5py.File(dataFilePath, "r") as h5:
+        delayScan = round(- h5[h5DelayPath][...] + delayZero,1)
     imageDark = _readDetectorImage(backgrounds["Dark"], h5CCDImagePath)
     imageNoProbe = _readDetectorImage(backgrounds["NoProbe"], h5CCDImagePath)
     imageOnlyProbe = _readDetectorImage(backgrounds["OnlyProbe"], h5CCDImagePath)
+
 
     imageShapes = {
         imageScan.shape,
@@ -251,7 +257,7 @@ def createQSpaceMap(
     # returned grid follows plotting convention: rows are Qy, columns are Qx.
     intensity = intensityQxQy.T
 
-    return qxCenters, qyCenters, intensity
+    return qxCenters, qyCenters, intensity, delayScan
 
 
 def _readDetectorImage(filePath, h5CCDImagePath):
