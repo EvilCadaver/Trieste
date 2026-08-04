@@ -4,10 +4,107 @@ from qSpaceFunctions import (
     createRadialIntensityProfile,
     subtractPolynomialBackground,
 )
+import csv
+from datetime import datetime
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
+from pathlib import Path
+
+
+def getSystemListDelimiter():
+    """Return the Windows list separator, falling back to a comma."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Control Panel\International",
+        ) as internationalKey:
+            delimiter, _ = winreg.QueryValueEx(internationalKey, "sList")
+
+        # csv.writer requires a one-character delimiter.
+        if isinstance(delimiter, str) and len(delimiter) == 1:
+            return delimiter
+    except (ImportError, OSError):
+        pass
+
+    return ","
+
+
+def formatSetting(value):
+    """Format settings, including NumPy slice masks, for the CSV header."""
+    if isinstance(value, slice):
+        start = "" if value.start is None else value.start
+        stop = "" if value.stop is None else value.stop
+        step = "" if value.step is None else f":{value.step}"
+        return f"{start}:{stop}{step}"
+
+    if isinstance(value, tuple):
+        return "[" + ", ".join(formatSetting(item) for item in value) + "]"
+
+    if isinstance(value, list):
+        return "[" + ", ".join(
+            repr(item) if isinstance(item, str) else formatSetting(item)
+            for item in value
+        ) + "]"
+
+    return str(value)
+
+
+def fileModificationTime(filePath):
+    """Return a timezone-aware ISO timestamp for an acquired data file."""
+    return datetime.fromtimestamp(
+        Path(filePath).stat().st_mtime
+    ).astimezone().isoformat(timespec="seconds")
+
+
+def saveQDelayData(
+    outputPath,
+    qValues,
+    delayValues,
+    intensityValues,
+    metadata,
+):
+    """Save the plotted Q-delay matrix as a sorted long-form CSV table."""
+    if intensityValues.shape != (qValues.size, delayValues.size):
+        raise ValueError(
+            "Intensity shape must equal (number of Q values, number of delays)"
+        )
+
+    qOrder = np.argsort(qValues, kind="stable")
+    delayOrder = np.argsort(delayValues, kind="stable")
+    delimiter = getSystemListDelimiter()
+
+    outputPath.parent.mkdir(parents=True, exist_ok=True)
+    with outputPath.open("w", newline="", encoding="utf-8") as outputFile:
+        writer = csv.writer(
+            outputFile,
+            delimiter=delimiter,
+            lineterminator="\n",
+        )
+
+        for name, value in metadata:
+            writer.writerow([name, formatSetting(value)])
+
+        writer.writerow([])
+        writer.writerow(["Q", "dt", "Intensity"])
+        writer.writerow(["nm^-1", "ps", "a.u."])
+
+        # Q is the primary sort key; delay is increasing within every Q value.
+        for qIndex in qOrder:
+            for delayIndex in delayOrder:
+                writer.writerow(
+                    [
+                        f"{qValues[qIndex]:.12g}",
+                        f"{delayValues[delayIndex]:.12g}",
+                        f"{intensityValues[qIndex, delayIndex]:.12g}",
+                    ]
+                )
+
+    return delimiter
+
 
 def moveFigure(fig, x, y):
     """Move a Matplotlib figure window to screen position (x, y)."""
@@ -105,6 +202,13 @@ Q_HIGH_CUTOFF = 90
 # Polynomial background fitted only after applying both Q cutoffs
 BACKGROUND_NPOLY = 3
 
+## Output files settings
+# Output folder
+folderOutput = Path(r"./Output_DS")
+folderOutput = folderOutput / sampleName
+# Duplicate delays handling rule
+handlingDuplicateDelays = "keep first"
+
 ## Calling the folder scanning function
 results = scanFiles(
     folderData=folderData,
@@ -165,6 +269,7 @@ lineProfile = None
 lineBackground = None
 lineCorrectedProfile = None
 heatmapProfiles = None
+profilesColorbar = None
 
 # The accumulated map uses one equally wide column per physical scan index.
 # Delay values are displayed as tick labels. This keeps repeated delays and
@@ -412,7 +517,7 @@ for dataIndex, dataFilePath in enumerate(allDataFiles):
             axProfiles.set_xticklabels(
                 [f"{delayScans[index]:g}" for index in tickIndexes]
             )
-            figProfiles.colorbar(
+            profilesColorbar = figProfiles.colorbar(
                 heatmapProfiles,
                 ax=axProfiles,
                 label="Background-subtracted summed intensity",
@@ -510,6 +615,18 @@ duplicateDelays = {
 uniqueDelays = np.array(sorted(delayToIndexes), dtype=float)
 suspectedMissingScans = []
 nominalDelayStep = None
+
+if uniqueDelays.size == 0:
+    raise RuntimeError("No finite delay values were available for export")
+
+# Use exactly one acquisition for every measured delay. The first physical
+# scan wins even if its profile is NaN because it was excluded or unusable;
+# later duplicates are not allowed to silently replace it.
+keptDataIndexes = np.array(
+    [delayToIndexes[delayScan][0] for delayScan in uniqueDelays],
+    dtype=int,
+)
+figureIntensityProfiles = intensityProfiles[:, keptDataIndexes]
 
 if uniqueDelays.size > 1:
     uniqueDelaySteps = np.diff(uniqueDelays)
@@ -610,9 +727,120 @@ if suspectedMissingScans:
 else:
     print("\nNo internal missing delay steps detected.")
 
+# Replace the live physical-index view with the final delay-coordinate figure.
+# This same deduplicated matrix is written below, so the CSV and figure agree.
+profilesColorbar.remove()
+axProfiles.clear()
+finiteFigureProfiles = figureIntensityProfiles[
+    np.isfinite(figureIntensityProfiles)
+]
+profileLimit = (
+    np.percentile(np.abs(finiteFigureProfiles), 99)
+    if finiteFigureProfiles.size
+    else 1.0
+)
+if profileLimit == 0:
+    profileLimit = 1.0
+
+heatmapProfiles = axProfiles.pcolormesh(
+    uniqueDelays,
+    profileDistance,
+    figureIntensityProfiles,
+    shading="nearest",
+    cmap=profileCmap,
+    vmin=-profileLimit,
+    vmax=profileLimit,
+)
+axProfiles.set_xlabel("Delay (ps)")
+axProfiles.set_ylabel(r"$|Q|$ (nm$^{-1}$)")
 axProfiles.set_title(
     f"Scan {scanNo}: background-subtracted profiles versus delay"
 )
+figProfiles.colorbar(
+    heatmapProfiles,
+    ax=axProfiles,
+    label="Background-subtracted summed intensity",
+)
+
+# Batch times use filesystem metadata because the HDF5 files do not expose a
+# clear acquisition timestamp. Record the paths and label the timestamps
+# explicitly to keep that provenance unambiguous.
+firstUsedIndex = int(np.min(keptDataIndexes))
+lastUsedIndex = int(np.max(keptDataIndexes))
+firstUsedFile = Path(allDataFiles[firstUsedIndex])
+lastUsedFile = Path(allDataFiles[lastUsedIndex])
+outputPath = folderOutput / f"{sampleName}_Scan_{scanNo:03d}_Q_vs_delay.csv"
+discardedDuplicateIndexes = sorted(
+    dataIndex
+    for dataIndexes in duplicateDelays.values()
+    for dataIndex in dataIndexes[1:]
+)
+brokenDataIndexes = [
+    dataIndex
+    for dataIndex, dataFilePath in enumerate(allDataFiles)
+    if dataFilePath in results["brokenFiles"]
+]
+indexesWithoutBackground = [
+    dataIndex
+    for dataIndex, dataFilePath in enumerate(allDataFiles)
+    if dataFilePath in results["filesWithoutBackground"]
+]
+
+metadata = [
+    ("First data batch physical index", firstUsedIndex),
+    ("First data batch file", firstUsedFile),
+    ("First data batch file modification time", fileModificationTime(firstUsedFile)),
+    ("Last data batch physical index", lastUsedIndex),
+    ("Last data batch file", lastUsedFile),
+    ("Last data batch file modification time", fileModificationTime(lastUsedFile)),
+    ("Duplicate-delay handling", "keep first physical scan"),
+    ("Physical data indexes represented", keptDataIndexes.tolist()),
+    ("Discarded duplicate physical indexes", discardedDuplicateIndexes),
+    ("Broken physical data indexes", brokenDataIndexes),
+    ("Physical data indexes without background", indexesWithoutBackground),
+    ("folderData", folderData),
+    ("folderOutput", folderOutput),
+    ("sampleName", sampleName),
+    ("scanNames", scanNames),
+    ("scanNo", scanNo),
+    ("minimumFileSizeRatio", minimumFileSizeRatio),
+    ("verbose", verbose),
+    ("h5CCDImagePath", h5CCDImagePath),
+    ("h5DelayPath", h5DelayPath),
+    ("delayZero", delayZero),
+    ("dataIndexesExcluded", dataIndexesExcluded),
+    ("N_BINN", N_BINN),
+    ("PIXEL_SIZE_m", PIXEL_SIZE),
+    ("LAMBDA_m", LAMBDA),
+    ("CY0_pixels", CY0),
+    ("CX0_pixels", CX0),
+    ("DCCD_m", DCCD),
+    ("ALPHA_rad", ALPHA),
+    ("OMEGA_rad", OMEGA),
+    ("alignMasks", alignMasks),
+    ("roiAllignMasks_y_x", roiAllignMasks),
+    ("roiBG_y_x", roiBG),
+    ("maskBS_y_x", maskBS),
+    ("Q_SPACE_BINS_MAX", Q_SPACE_BINS_MAX),
+    ("plotProfileAngles", plotProfileAngles),
+    ("plotProfileAnglesColour", plotProfileAnglesColour),
+    ("ZETA_deg", ZETA),
+    ("D_ZETA_deg", D_ZETA),
+    ("ZETA_SYMMETRY", ZETA_SYMMETRY),
+    ("RADIAL_STEP_BIN", RADIAL_STEP_BIN),
+    ("Q_LOW_CUTOFF_percent", Q_LOW_CUTOFF),
+    ("Q_HIGH_CUTOFF_percent", Q_HIGH_CUTOFF),
+    ("BACKGROUND_NPOLY", BACKGROUND_NPOLY),
+]
+delimiter = saveQDelayData(
+    outputPath=outputPath,
+    qValues=profileDistance,
+    delayValues=uniqueDelays,
+    intensityValues=figureIntensityProfiles,
+    metadata=metadata,
+)
+print(f"Saved Q-vs-delay data to {outputPath} (delimiter {delimiter!r})")
+
 plt.ioff()
 
 # Desktop backends expose a window and should remain open after processing.

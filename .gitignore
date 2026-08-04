@@ -3,6 +3,7 @@ Data/
 Output/
 *.m
 .codex/
+*.csv
 
 # Python bytecode and caches
 __pycache__/
