@@ -10,7 +10,6 @@ def createQSpaceMap(
     h5DelayPath,
     delayZero,
     dataIndex,
-    N_BINN,
     PIXEL_SIZE,
     LAMBDA,
     CY0,
@@ -18,7 +17,6 @@ def createQSpaceMap(
     DCCD,
     ALPHA,
     OMEGA,
-    BETA,
     alignMasks,
     roiAllignMasks,
     roiBG,
@@ -58,8 +56,6 @@ def createQSpaceMap(
         raise TypeError("dataIndex must be an integer")
     if dataIndex < 0 or dataIndex >= len(results["allDataFiles"]):
         raise IndexError(f"Scan index {dataIndex} does not exist")
-    if N_BINN <= 0:
-        raise ValueError("N_BINN must be positive")
     if PIXEL_SIZE <= 0 or LAMBDA <= 0 or DCCD <= 0:
         raise ValueError("PIXEL_SIZE, LAMBDA, and DCCD must be positive")
     if not isinstance(Q_SPACE_BINS_MAX, (int, np.integer)):
@@ -87,14 +83,8 @@ def createQSpaceMap(
     # Read and orient all detector images in the same way as analysis.py.
     imageScan = _readDetectorImage(dataFilePath, h5CCDImagePath)
     imageDark = _readDetectorImage(backgrounds["Dark"], h5CCDImagePath)
-    imageNoProbe = _readDetectorImage(
-        backgrounds["NoProbe"],
-        h5CCDImagePath,
-    )
-    imageOnlyProbe = _readDetectorImage(
-        backgrounds["OnlyProbe"],
-        h5CCDImagePath,
-    )
+    imageNoProbe = _readDetectorImage(backgrounds["NoProbe"], h5CCDImagePath)
+    imageOnlyProbe = _readDetectorImage(backgrounds["OnlyProbe"], h5CCDImagePath)
 
     imageShapes = {
         imageScan.shape,
@@ -129,10 +119,7 @@ def createQSpaceMap(
     if normScan == 0 or normOnlyProbe == 0:
         raise ValueError("A differential detector image has zero normalization")
 
-    image = (
-        imageDifferential / normScan
-        - imageDifferentialNoProbe / normOnlyProbe
-    )
+    image = (imageDifferential / normScan - imageDifferentialNoProbe / normOnlyProbe)
 
     if alignMasks:
         # Preserve the detector-space diagnostic from analysis.py. The XOR
@@ -176,17 +163,12 @@ def createQSpaceMap(
     height, width = image.shape
     v, u = np.indices((height, width))
 
-    R0 = np.array(
-        [
-            DCCD / np.cos(OMEGA) * np.cos(ALPHA),
-            0.0,
-            -DCCD / np.cos(OMEGA) * np.sin(ALPHA),
-        ]
-    )
+    R0 = np.array([ DCCD / np.cos(OMEGA) * np.cos(ALPHA),
+                    0.0,
+                    -DCCD / np.cos(OMEGA) * np.sin(ALPHA)])
+    BETA = OMEGA + ALPHA
     detectorRows = np.array([0.0, 1.0, 0.0])
-    detectorColumns = np.array(
-        [-np.sin(BETA), 0.0, -np.cos(BETA)]
-    )
+    detectorColumns = np.array([-np.sin(BETA), 0.0, -np.cos(BETA)])
 
     du = (u - CX0) * PIXEL_SIZE
     dv = (v - CY0) * PIXEL_SIZE
