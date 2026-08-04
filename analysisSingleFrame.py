@@ -1,5 +1,5 @@
 from fileScan import scanFiles
-from qSpaceMap import createQSpaceMap
+from qSpaceFunctions import createQSpaceMap, createRadialIntensityProfile
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -51,6 +51,16 @@ maskBS = [np.s_[379:647,0:222], np.s_[511:1024,29:120]]
 ## Q-space plot settings
 # Maximum number of reciprocal-space bins along the longer Qx/Qy dimension.
 Q_SPACE_BINS_MAX = 512
+
+## Q-space analysis
+# Angle from Qx in deg
+ZETTA = 0
+# Acceptance angle in deg
+D_ZETTA = 20
+# Symmetry
+ZETTA_SYMMETRY = 4
+# Radial step bin
+RADIAL_STEP_BIN = 2
 
 ## Calling the folder scanning function
 results = scanFiles(
@@ -124,4 +134,28 @@ heatmap = ax.pcolormesh(
 ax.set_title(f"Scan {scanNo}, data batch {dataIndex}, delay = {delayScan} ps")
 ax.set_aspect("equal", adjustable="box")
 fig.colorbar(heatmap, ax=ax, label="Mean intensity per bin")
+
+# Sum intensities in radial shells, restricted to the reference direction and
+# all directions related to it by ZETTA_SYMMETRY. D_ZETTA is the complete
+# angular width, so the accepted half-width is D_ZETTA/2 on either side.
+distance, sumIntensity = createRadialIntensityProfile(
+    qxCenters=qxCenters,
+    qyCenters=qyCenters,
+    intensity=intensityQxQy,
+    ZETTA=ZETTA,
+    D_ZETTA=D_ZETTA,
+    ZETTA_SYMMETRY=ZETTA_SYMMETRY,
+    RADIAL_STEP_BIN=RADIAL_STEP_BIN,
+)
+
+figProfile, axProfile = plt.subplots()
+axProfile.plot(distance, sumIntensity)
+axProfile.set_xlabel(r"$|Q|$ (nm$^{-1}$)")
+axProfile.set_ylabel("Summed intensity")
+axProfile.set_title(
+    f"Zetta={ZETTA} deg, symmetry={ZETTA_SYMMETRY}, "
+    f"acceptance={D_ZETTA} deg"
+)
+axProfile.grid(True, alpha=0.3)
+
 plt.show()

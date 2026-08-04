@@ -158,7 +158,7 @@ def createQSpaceMap(
 
         qxCenters = selectedColumns[0, :]
         qyCenters = selectedRows[:, 0]
-        return qxCenters, qyCenters, intensity
+        return qxCenters, qyCenters, intensity, delayScan
 
     # Remove the residual offset using the same background ROI, then exclude
     # beam-stop pixels from all subsequent calculations.
@@ -258,6 +258,113 @@ def createQSpaceMap(
     intensity = intensityQxQy.T
 
     return qxCenters, qyCenters, intensity, delayScan
+
+
+def createRadialIntensityProfile(
+    qxCenters,
+    qyCenters,
+    intensity,
+    ZETTA,
+    D_ZETTA,
+    ZETTA_SYMMETRY,
+    RADIAL_STEP_BIN,
+):
+    """Sum intensity versus distance inside symmetry-related angular sectors.
+
+    Angles are specified in degrees. ``ZETTA`` is the reference direction
+    measured counter-clockwise from +Qx. ``ZETTA_SYMMETRY`` creates equally
+    spaced directions over 360 degrees. ``D_ZETTA`` is the total acceptance
+    angle around every direction, so each direction accepts ±D_ZETTA/2.
+    ``RADIAL_STEP_BIN`` is a positive integer multiplier of the native Q-space
+    grid spacing. For example, 2 combines distances into shells twice as wide
+    as one Q-space bin.
+
+    Radial bins use the Q-space grid spacing. Bins containing no accepted,
+    finite intensity values are returned as NaN rather than as a false zero.
+    """
+    qxCenters = np.asarray(qxCenters, dtype=float)
+    qyCenters = np.asarray(qyCenters, dtype=float)
+    intensity = np.asarray(intensity, dtype=float)
+
+    if qxCenters.ndim != 1 or qyCenters.ndim != 1:
+        raise ValueError("qxCenters and qyCenters must be one-dimensional")
+    expectedShape = (qyCenters.size, qxCenters.size)
+    if intensity.shape != expectedShape:
+        raise ValueError(
+            f"intensity must have shape {expectedShape}, "
+            f"received {intensity.shape}"
+        )
+    if not isinstance(ZETTA_SYMMETRY, (int, np.integer)):
+        raise TypeError("ZETTA_SYMMETRY must be an integer")
+    if ZETTA_SYMMETRY < 1:
+        raise ValueError("ZETTA_SYMMETRY must be at least 1")
+    if (
+        isinstance(RADIAL_STEP_BIN, (bool, np.bool_))
+        or not isinstance(RADIAL_STEP_BIN, (int, np.integer))
+    ):
+        raise TypeError("RADIAL_STEP_BIN must be an integer")
+    if RADIAL_STEP_BIN < 1:
+        raise ValueError("RADIAL_STEP_BIN must be at least 1")
+    if not np.isfinite(ZETTA) or not np.isfinite(D_ZETTA):
+        raise ValueError("ZETTA and D_ZETTA must be finite")
+    if D_ZETTA <= 0 or D_ZETTA > 360:
+        raise ValueError("D_ZETTA must be greater than 0 and at most 360 degrees")
+
+    qxGrid, qyGrid = np.meshgrid(qxCenters, qyCenters)
+    distanceGrid = np.hypot(qxGrid, qyGrid)
+    angleGrid = np.degrees(np.arctan2(qyGrid, qxGrid))
+
+    # Folding by the symmetry period finds the signed angular difference from
+    # the nearest equivalent direction: ZETTA + k*360/ZETTA_SYMMETRY.
+    symmetryPeriod = 360.0 / ZETTA_SYMMETRY
+    angleDifference = (
+        (angleGrid - ZETTA + symmetryPeriod / 2) % symmetryPeriod
+        - symmetryPeriod / 2
+    )
+    accepted = (
+        np.abs(angleDifference) <= D_ZETTA / 2
+    ) & np.isfinite(intensity)
+
+    if not np.any(accepted):
+        raise ValueError("No finite Q-space bins fall inside the angular acceptance")
+
+    # The Q map uses square bins, so its axis spacing is also a natural radial
+    # step. Obtain it from either axis to avoid introducing another constant.
+    axisSteps = np.concatenate(
+        [np.abs(np.diff(qxCenters)), np.abs(np.diff(qyCenters))]
+    )
+    axisSteps = axisSteps[np.isfinite(axisSteps) & (axisSteps > 0)]
+    if axisSteps.size == 0:
+        raise ValueError("Cannot determine radial spacing from the Q-space axes")
+    radialStep = RADIAL_STEP_BIN * np.median(axisSteps)
+
+    acceptedDistances = distanceGrid[accepted]
+    acceptedIntensity = intensity[accepted]
+    radialMaximum = acceptedDistances.max()
+    radialEdges = np.arange(
+        0.0,
+        radialMaximum + radialStep,
+        radialStep,
+    )
+    if radialEdges.size < 2:
+        radialEdges = np.array([0.0, radialStep])
+    elif radialEdges[-1] <= radialMaximum:
+        radialEdges = np.append(radialEdges, radialEdges[-1] + radialStep)
+
+    sumIntensity, _ = np.histogram(
+        acceptedDistances,
+        bins=radialEdges,
+        weights=acceptedIntensity,
+    )
+    acceptedCount, _ = np.histogram(
+        acceptedDistances,
+        bins=radialEdges,
+    )
+    sumIntensity = sumIntensity.astype(float)
+    sumIntensity[acceptedCount == 0] = np.nan
+    distance = 0.5 * (radialEdges[:-1] + radialEdges[1:])
+
+    return distance, sumIntensity
 
 
 def _readDetectorImage(filePath, h5CCDImagePath):
