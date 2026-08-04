@@ -62,18 +62,6 @@ results = scanFiles(
     minimumFileSizeRatio=minimumFileSizeRatio,
 )
 
-## Unpacking results dictionary
-referenceFileSize = results["referenceFileSize"]
-minimumFileSize = results["minimumFileSize"]
-brokenFiles = results["brokenFiles"]
-fileSizes = results["fileSizes"]
-allDataFiles = results["allDataFiles"]
-dataIndexByFile = results["dataIndexByFile"]
-backgroundsForFile = results["backgroundsForFile"]
-backgroundNames = results["backgroundNames"]
-backgroundGroups = results["backgroundGroups"]
-invalidGroups = results["invalidBackgroundGroups"]
-
 qxCenters, qyCenters, intensityQxQy, delayScan = createQSpaceMap(
     results=results,
     h5CCDImagePath=h5CCDImagePath,
