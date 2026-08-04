@@ -2,6 +2,8 @@ from fileScan import scanFiles
 from qSpaceFunctions import createQSpaceMap, createRadialIntensityProfile
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+from matplotlib.patches import Patch
 
 ## Scan specific settings
 # Data folder location
@@ -31,7 +33,7 @@ N_BINN = 2                      #Binning of the detector
 PIXEL_SIZE = N_BINN * 13.5e-6   #Pixel edge length, m
 LAMBDA = 23.5e-9                #Wavelength, m
 CY0 = 511                       #Reflection centre Y, pixels
-CX0 = 49                        #Reflection centre X, pixels
+CX0 = 15                        #Reflection centre X, pixels
 DCCD = 67e-3                    #Shortest distance from the incident point on the sample to the detector, m 
 ALPHA = 17 /180*np.pi           #Incidence beam angle, rad
 OMEGA = 16.5 /180*np.pi         #Angle between scattered beam maximum and the detector normal (positive towards the sample surface), rad
@@ -53,8 +55,10 @@ maskBS = [np.s_[379:647,0:222], np.s_[511:1024,29:120]]
 Q_SPACE_BINS_MAX = 512
 
 ## Q-space analysis
+# Show angles chosen for integration
+plotProfileAngles = True
 # Angle from Qx in deg
-ZETTA = 0
+ZETTA = 45
 # Acceptance angle in deg
 D_ZETTA = 20
 # Symmetry
@@ -119,9 +123,9 @@ colourLimit = np.percentile(np.abs(finiteIntensity), 99)
 if colourLimit == 0:
     colourLimit = 1.0
 
-fig, ax = plt.subplots()
+figQspace, axQspace = plt.subplots()
 
-heatmap = ax.pcolormesh(
+heatmap = axQspace.pcolormesh(
     qxCenters,
     qyCenters,
     intensityQxQy,
@@ -131,9 +135,56 @@ heatmap = ax.pcolormesh(
     vmax=colourLimit,
 )
 
-ax.set_title(f"Scan {scanNo}, data batch {dataIndex}, delay = {delayScan} ps")
-ax.set_aspect("equal", adjustable="box")
-fig.colorbar(heatmap, ax=ax, label="Mean intensity per bin")
+if plotProfileAngles:
+    qxGrid, qyGrid = np.meshgrid(qxCenters, qyCenters)
+
+    angleGrid = np.degrees(
+        np.arctan2(qyGrid, qxGrid)
+    )
+
+    symmetryPeriod = 360.0 / ZETTA_SYMMETRY
+
+    angleDifference = (
+        (
+            angleGrid
+            - ZETTA
+            + symmetryPeriod / 2
+        )
+        % symmetryPeriod
+        - symmetryPeriod / 2
+    )
+
+    profileMask = (
+        np.abs(angleDifference) <= D_ZETTA / 2
+    ) & np.isfinite(intensityQxQy)
+
+    acceptedOverlay = np.ma.masked_where(
+        ~profileMask,
+        np.ones_like(intensityQxQy),
+    )
+
+    axQspace.pcolormesh(
+        qxCenters,
+        qyCenters,
+        acceptedOverlay,
+        shading="nearest",
+        cmap=ListedColormap(["green"]),
+        alpha=0.25,
+    )
+
+    # axQspace.legend(
+    #     handles=[
+    #         Patch(
+    #             facecolor="green",
+    #             alpha=0.25,
+    #             label="Included in radial profile",
+    #         )
+    #     ]
+    # )
+
+axQspace.set_title(f"Scan {scanNo}, data batch {dataIndex}, delay = {delayScan} ps")
+axQspace.set_aspect("equal", adjustable="box")
+figQspace.colorbar(heatmap, ax=axQspace, label="Mean intensity per bin")
 
 # Sum intensities in radial shells, restricted to the reference direction and
 # all directions related to it by ZETTA_SYMMETRY. D_ZETTA is the complete
