@@ -4,6 +4,7 @@ Output/
 *.m
 .codex/
 *.csv
+Output_DS/
 
 # Python bytecode and caches
 __pycache__/
