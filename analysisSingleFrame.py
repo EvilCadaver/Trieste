@@ -74,7 +74,7 @@ backgroundNames = results["backgroundNames"]
 backgroundGroups = results["backgroundGroups"]
 invalidGroups = results["invalidBackgroundGroups"]
 
-qxCenters, qyCenters, intensity, delayScan = createQSpaceMap(
+qxCenters, qyCenters, intensityQxQy, delayScan = createQSpaceMap(
     results=results,
     h5CCDImagePath=h5CCDImagePath,
     h5DelayPath=h5DelayPath,
@@ -96,7 +96,7 @@ qxCenters, qyCenters, intensity, delayScan = createQSpaceMap(
 
 if alignMasks:
     fig, ax = plt.subplots()
-
+    intensity = intensityQxQy
     heatmap = ax.pcolormesh(
         qxCenters,
         qyCenters,
@@ -111,14 +111,26 @@ if alignMasks:
     plt.show()
     exit()
 
+finiteIntensity = intensityQxQy[np.isfinite(intensityQxQy)]
+if finiteIntensity.size == 0:
+    raise ValueError("No detector intensities were assigned to the Qx/Qy grid")
+
+# A symmetric scale represents positive and negative differential intensities
+# while reducing the influence of isolated extreme pixels.
+colourLimit = np.percentile(np.abs(finiteIntensity), 99)
+if colourLimit == 0:
+    colourLimit = 1.0
+
 fig, ax = plt.subplots()
 
 heatmap = ax.pcolormesh(
     qxCenters,
     qyCenters,
-    intensity,
+    intensityQxQy,
     shading="nearest",
     cmap="seismic",
+    vmin=-colourLimit,
+    vmax=colourLimit,
 )
 
 ax.set_title(f"Scan {scanNo}, data batch {dataIndex}, delay = {delayScan} ps")
