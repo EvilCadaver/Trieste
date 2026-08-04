@@ -78,6 +78,8 @@ def saveQDelayData(
     delimiter = getSystemListDelimiter()
 
     outputPath.parent.mkdir(parents=True, exist_ok=True)
+    # Mode "w" deliberately truncates an existing CSV: outputs are always
+    # replaced and the analysis never appends to data from an earlier run.
     with outputPath.open("w", newline="", encoding="utf-8") as outputFile:
         writer = csv.writer(
             outputFile,
@@ -742,6 +744,27 @@ if suspectedMissingScans:
 else:
     print("\nNo internal missing delay steps detected.")
 
+# Insert every inferred missing delay as an explicit all-NaN column. This makes
+# gaps visible in the final heatmap and keeps the exported table faithful to
+# the plotted data instead of stretching neighbouring scans across each gap.
+missingDelayValues = np.array(
+    [missingScan["delay"] for missingScan in suspectedMissingScans],
+    dtype=float,
+)
+if missingDelayValues.size:
+    missingProfiles = np.full(
+        (profileDistance.size, missingDelayValues.size),
+        np.nan,
+    )
+    figureDelays = np.concatenate((figureDelays, missingDelayValues))
+    figureIntensityProfiles = np.concatenate(
+        (figureIntensityProfiles, missingProfiles),
+        axis=1,
+    )
+    figureDelayOrder = np.argsort(figureDelays, kind="stable")
+    figureDelays = figureDelays[figureDelayOrder]
+    figureIntensityProfiles = figureIntensityProfiles[:, figureDelayOrder]
+
 # Replace the live physical-index view with the final delay-coordinate figure.
 # This same deduplicated matrix is written below, so the CSV and figure agree.
 profilesColorbar.remove()
@@ -784,7 +807,11 @@ firstUsedIndex = int(np.min(keptDataIndexes))
 lastUsedIndex = int(np.max(keptDataIndexes))
 firstUsedFile = Path(allDataFiles[firstUsedIndex])
 lastUsedFile = Path(allDataFiles[lastUsedIndex])
-outputPath = folderOutput / f"{sampleName}_Scan_{scanNo:03d}_Q_vs_delay.csv"
+outputPath = folderOutput / (
+    f"{sampleName}_Scan_{scanNo:03d}_Q_vs_delay_"
+    f"a{ZETA:g}deg_d{D_ZETA:g}deg_sym{ZETA_SYMMETRY:g}.csv"
+)
+pngOutputPath = outputPath.with_suffix(".png")
 brokenDataIndexes = [
     dataIndex
     for dataIndex, dataFilePath in enumerate(allDataFiles)
@@ -806,6 +833,7 @@ metadata = [
     ("handlingDuplicateDelays", handlingDuplicateDelays),
     ("Physical data indexes represented", keptDataIndexes.tolist()),
     ("Discarded duplicate physical indexes", discardedDuplicateIndexes),
+    ("Inserted missing delays as NaN (ps)", missingDelayValues.tolist()),
     ("Broken physical data indexes", brokenDataIndexes),
     ("Physical data indexes without background", indexesWithoutBackground),
     ("folderData", folderData),
@@ -842,6 +870,15 @@ metadata = [
     ("Q_HIGH_CUTOFF_percent", Q_HIGH_CUTOFF),
     ("BACKGROUND_NPOLY", BACKGROUND_NPOLY),
 ]
+
+existingOutputPaths = [
+    path for path in (outputPath, pngOutputPath) if path.exists()
+]
+if existingOutputPaths:
+    print("Overwriting existing output file(s):")
+    for existingOutputPath in existingOutputPaths:
+        print(f"  {existingOutputPath}")
+
 delimiter = saveQDelayData(
     outputPath=outputPath,
     qValues=profileDistance,
@@ -850,6 +887,13 @@ delimiter = saveQDelayData(
     metadata=metadata,
 )
 print(f"Saved Q-vs-delay data to {outputPath} (delimiter {delimiter!r})")
+# Matplotlib's savefig replaces an existing file at the same path.
+figProfiles.savefig(
+    pngOutputPath,
+    dpi=300,
+    bbox_inches="tight",
+)
+print(f"Saved Q-vs-delay figure to {pngOutputPath} (300 dpi)")
 
 plt.ioff()
 
