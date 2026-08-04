@@ -123,7 +123,23 @@ colourLimit = np.percentile(np.abs(finiteIntensity), 99)
 if colourLimit == 0:
     colourLimit = 1.0
 
-figQspace, axQspace = plt.subplots()
+qxSpan = np.ptp(qxCenters)
+qySpan = np.ptp(qyCenters)
+
+longSide = 8.0  # inches
+
+if qxSpan >= qySpan:
+    plotWidth = longSide
+    plotHeight = longSide * qySpan / qxSpan
+else:
+    plotHeight = longSide
+    plotWidth = longSide * qxSpan / qySpan
+
+# Add some horizontal space for the colour bar.
+figQspace, axQspace = plt.subplots(
+    figsize=(plotWidth + 1.2, plotHeight),
+    layout="constrained",
+)
 
 heatmap = axQspace.pcolormesh(
     qxCenters,
@@ -208,5 +224,19 @@ axProfile.set_title(
     f"acceptance={D_ZETTA} deg"
 )
 axProfile.grid(True, alpha=0.3)
+
+def moveFigure(fig, x, y):
+    """Move a Matplotlib figure window to screen position (x, y)."""
+    window = fig.canvas.manager.window
+
+    if hasattr(window, "move"):          # Qt backend
+        window.move(x, y)
+    elif hasattr(window, "wm_geometry"):  # Tk backend
+        window.wm_geometry(f"+{x}+{y}")
+    else:
+        print("Current Matplotlib backend does not support window positioning")
+
+moveFigure(figQspace, 20, 50)
+moveFigure(figProfile, 600, 50)
 
 plt.show()
