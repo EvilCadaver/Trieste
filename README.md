@@ -43,7 +43,7 @@ files and require a suitable MATLAB installation.
 For a sample called `FeRh_A04` and scan number `68`, the scanner expects:
 
 ```text
-Data/
+folderData/
 └── FeRh_A04/
     ├── Scan_068/
     │   └── rawdata/
