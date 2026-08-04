@@ -490,6 +490,126 @@ print(
     f"{numberOfScans - validScanCount} NaN scan columns"
 )
 
+# Group physical scan indexes by their measured delay. Delays were rounded to
+# one decimal place when read, so equality here represents the acquisition
+# metadata at the same precision used throughout the analysis.
+delayToIndexes = {}
+for dataIndex, delayScan in enumerate(delayScans):
+    if np.isfinite(delayScan):
+        delayToIndexes.setdefault(float(delayScan), []).append(dataIndex)
+
+duplicateDelays = {
+    delayScan: dataIndexes
+    for delayScan, dataIndexes in delayToIndexes.items()
+    if len(dataIndexes) > 1
+}
+
+# Infer the intended delay step from the median positive spacing between unique
+# delays. Gaps larger than this step are reported as suspected missing scans;
+# they are diagnostic only and are not inserted into intensityProfiles.
+uniqueDelays = np.array(sorted(delayToIndexes), dtype=float)
+suspectedMissingScans = []
+nominalDelayStep = None
+
+if uniqueDelays.size > 1:
+    uniqueDelaySteps = np.diff(uniqueDelays)
+    positiveDelaySteps = uniqueDelaySteps[uniqueDelaySteps > 0]
+
+    if positiveDelaySteps.size:
+        nominalDelayStep = float(np.median(positiveDelaySteps))
+        delayTolerance = max(1e-9, 0.1 * nominalDelayStep)
+
+        for leftDelay, rightDelay in zip(
+            uniqueDelays[:-1],
+            uniqueDelays[1:],
+        ):
+            gap = rightDelay - leftDelay
+            numberOfSteps = int(round(gap / nominalDelayStep))
+
+            if (
+                numberOfSteps > 1
+                and np.isclose(
+                    gap,
+                    numberOfSteps * nominalDelayStep,
+                    atol=delayTolerance,
+                    rtol=0,
+                )
+            ):
+                for stepIndex in range(1, numberOfSteps):
+                    suspectedMissingScans.append(
+                        {
+                            "delay": leftDelay + stepIndex * nominalDelayStep,
+                            "leftIndexes": delayToIndexes[float(leftDelay)],
+                            "rightIndexes": delayToIndexes[float(rightDelay)],
+                        }
+                    )
+
+duplicateFigures = []
+
+if duplicateDelays:
+    print("\nWARNING: duplicate delay acquisitions detected:")
+
+    for duplicateNumber, (delayScan, dataIndexes) in enumerate(
+        sorted(duplicateDelays.items())
+    ):
+        print(f"  Delay {delayScan:g} ps: data indexes {dataIndexes}")
+
+        # Compare the final profiles actually used by the delay map: both Q
+        # cutoffs have already been applied and the polynomial backgrounds have
+        # already been subtracted independently for every acquisition.
+        figDuplicate, axDuplicate = plt.subplots(layout="constrained")
+
+        for dataIndex in dataIndexes:
+            duplicateProfile = intensityProfiles[:, dataIndex]
+
+            if np.any(np.isfinite(duplicateProfile)):
+                axDuplicate.plot(
+                    profileDistance,
+                    duplicateProfile,
+                    label=f"Data index {dataIndex}",
+                )
+            else:
+                # Add a legend entry even when this duplicate was excluded,
+                # broken, or otherwise unavailable.
+                axDuplicate.plot(
+                    [],
+                    [],
+                    label=f"Data index {dataIndex} (NaN)",
+                )
+
+        axDuplicate.set_xlabel(r"$|Q|$ (nm$^{-1}$)")
+        axDuplicate.set_ylabel(
+            "Background-subtracted summed intensity"
+        )
+        axDuplicate.set_title(
+            f"Duplicate acquisitions at delay {delayScan:g} ps"
+        )
+        axDuplicate.grid(True, alpha=0.3)
+        axDuplicate.legend()
+        duplicateFigures.append(figDuplicate)
+        moveFigure(
+            figDuplicate,
+            1050,
+            100 + 60 * duplicateNumber,
+        )
+
+if suspectedMissingScans:
+    stepText = (
+        f" using inferred delay step {nominalDelayStep:g} ps"
+        if nominalDelayStep is not None
+        else ""
+    )
+    print(f"\nWARNING: suspected missing scans{stepText}:")
+
+    for missingScan in suspectedMissingScans:
+        print(
+            f"  Expected delay {missingScan['delay']:g} ps between "
+            f"data indexes {missingScan['leftIndexes']} and "
+            f"{missingScan['rightIndexes']}"
+        )
+else:
+    print("\nNo internal missing delay steps detected.")
+
 axProfiles.set_title(
     f"Scan {scanNo}: background-subtracted profiles versus delay"
 )
