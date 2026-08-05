@@ -25,7 +25,7 @@ h5DelayPath = "/photon_source/SeedLaser/Delay_line_2"
 # Delay zero setting
 delayZero = -3096.49
 # Single scan index to analyse
-dataIndex = 50
+dataIndex = 20
 
 ## Scan measurement parameters
 N_BINN = 2                      #Binning of the detector
@@ -39,12 +39,12 @@ OMEGA = 16.5 /180*np.pi         #Angle between scattered beam maximum and the de
 
 ## Masks allignemnt
 # Make true for masks allignment
-alignMasks = True
+alignMasks = False
 # Limit the region to show during masks allignment
-roiAllignMasks = np.s_[200:1100, 0:300]
+roiAllignMasks = np.s_[345:610, 0:220]
 
 # ROI for the background zero substraction
-roiBG = np.s_[400:450, 160:210] 
+roiBG = np.s_[420:450, 60:90] 
 
 ## Masking regions, will be added to the empty mask, add rectangles as np.s_[y0:y1,x0:x1] to the list [ ] structure.
 maskBS = [np.s_[342:612,0:222], np.s_[511:1024,24:118]]
@@ -102,10 +102,22 @@ if alignMasks:
     vmin = 0.1 * valid.min()
     vmax = 0.1 * valid.max()
     figDet, axDet = plt.subplots()
+
+    height, width = imageCCD.shape
+    rowSlice, columnSlice = roiAllignMasks
+    y0 = 0 if rowSlice.start is None else rowSlice.start
+    x0 = 0 if columnSlice.start is None else columnSlice.start
+    detectorExtent = (
+        x0 -0.5,           # left
+        x0 + width -0.5,   # right
+        y0 + height -0.5,  # bottom
+        y0 -0.5,           # top, because origin="upper"
+    )    
     detmap = axDet.imshow(
         imageCCD,
         origin="upper",
-        cmap="RdBu",
+        extent=detectorExtent,
+        cmap="RdBu_r",
         vmin=vmin,
         vmax=vmax,
     )
@@ -123,14 +135,16 @@ figDet, axDet = plt.subplots()
 detmap = axDet.imshow(
     imageCCD,
     origin="upper",
-    cmap="RdBu",
+    cmap="RdBu_r",
     vmin=vmin,
     vmax=vmax,
 )
+figDet.colorbar(detmap, ax=axDet, label="Mean intensity per bin")
 ## Detector-array coordinates are (row, column) = (CY0, CX0). axhline and
 ## axvline span the full axes, so the crosshair remains complete when zooming.
 axDet.axhline(CY0, color="lime", linewidth=3.0, linestyle="-.")
 axDet.axvline(CX0, color="lime", linewidth=3.0, linestyle="-.")
+
 
 finiteIntensity = intensityQxQy[np.isfinite(intensityQxQy)]
 if finiteIntensity.size == 0:
