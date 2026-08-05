@@ -11,8 +11,6 @@ scanNames = ["Scan", "", "NoProbe", "OnlyProbe", "Dark"]
 scanNo = 27
 # File size ratio for scan batches rejection
 minimumFileSizeRatio = 0.95
-# Verbose reporting on file scan results
-verbose = False
 
 ## Single file analysis for now
 ## HDF5 package paths

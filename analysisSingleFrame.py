@@ -5,13 +5,14 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
 ## Scan specific settings
+# Verbose reporting on file scan results
+verbose = True
 from configs.FeRh_A06 import (
     folderData,
     sampleName,
     scanNames,
     scanNo,
     minimumFileSizeRatio,
-    verbose,
     h5CCDImagePath,
     h5DelayPath,
     delayZero,

@@ -137,13 +137,14 @@ def readDelay(dataFilePath, h5DelayPath, delayZero):
     return round(float(-delayValue + delayZero), 1)
 
 ## Scan specific settings
+# Verbose reporting on file scan results
+verbose = False
 from configs.FeRh_A06 import (
     folderData,
     sampleName,
     scanNames,
     scanNo,
     minimumFileSizeRatio,
-    verbose,
     h5CCDImagePath,
     h5DelayPath,
     delayZero,
