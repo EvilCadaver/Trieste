@@ -16,10 +16,13 @@ with open(fileData, newline="", encoding="utf-8") as inputCSV:
     print(f"Delimiters detected: {repr(dialect.delimiter)}")
     inputCSV.seek(0)
     reader = csv.reader(inputCSV, dialect)
+    input_metadata = {}
 
     for row in reader:
         if row and row[0].strip() == "***DATA***":
             break
+        if len(row) >= 2:
+            input_metadata[row[0].strip()] = row[1].strip()
     else:
         raise ValueError("The CSV file does not contain a ***DATA*** marker")
 
@@ -83,6 +86,71 @@ fourier_amplitude = (
     / np.sum(window)
 )
 
+# The zero-frequency bin represents the removed mean and is omitted from output.
+output_frequencies_ghz = frequencies[1:] * 1000.0
+output_amplitude = fourier_amplitude[:, 1:]
+
+missing_delay_values = delay_values[np.isnan(intensity).any(axis=0)]
+frequency_step_ghz = output_frequencies_ghz[1] - output_frequencies_ghz[0]
+fourier_metadata = [
+    ("sourceFile", fileData.name),
+    ("sampleName", input_metadata.get("sampleName", "not available")),
+    ("ZETA_deg", input_metadata.get("ZETA_deg", "not available")),
+    ("D_ZETA_deg", input_metadata.get("D_ZETA_deg", "not available")),
+    (
+        "ZETA_SYMMETRY",
+        input_metadata.get("ZETA_SYMMETRY", "not available"),
+    ),
+    ("CX0_pixels", input_metadata.get("CX0_pixels", "not available")),
+    ("CY0_pixels", input_metadata.get("CY0_pixels", "not available")),
+    ("timeSampleCount", len(delay_values)),
+    ("timeStep_ps", f"{delay_steps[0]:.12g}"),
+    ("timeRange_ps", f"[{delay_values[0]:.12g}, {delay_values[-1]:.12g}]"),
+    (
+        "missingTimeSteps_ps",
+        "[" + ", ".join(f"{value:.12g}" for value in missing_delay_values) + "]",
+    ),
+    ("dataGapTreatment", "linear interpolation along time for each Q"),
+    ("DCRemoval", "subtract mean of each Q trace"),
+    ("windowFunction", "Hann"),
+    ("FFT", "real FFT along time axis"),
+    ("amplitudeNormalization", "2 / sum(Hann window)"),
+    ("zeroFrequencyOmitted", True),
+    ("frequencyBinCount", len(output_frequencies_ghz)),
+    ("frequencyStep_GHz", f"{frequency_step_ghz:.12g}"),
+    (
+        "frequencyRange_GHz",
+        (
+            f"[{output_frequencies_ghz[0]:.12g}, "
+            f"{output_frequencies_ghz[-1]:.12g}]"
+        ),
+    ),
+]
+
+fourier_csv = fileData.with_name(f"{fileData.stem}_Fourier.csv")
+with fourier_csv.open("w", newline="", encoding="utf-8") as output_file:
+    writer = csv.writer(
+        output_file,
+        delimiter=dialect.delimiter,
+        lineterminator="\n",
+    )
+    writer.writerows(fourier_metadata)
+    writer.writerow(["***DATA***"])
+    writer.writerow(["Q", "f", "Intensity"])
+    writer.writerow([column_units[0], "GHz", column_units[2]])
+
+    for q_index, q_value in enumerate(q_values):
+        for frequency_index, frequency_ghz in enumerate(output_frequencies_ghz):
+            writer.writerow(
+                [
+                    f"{q_value:.12g}",
+                    f"{frequency_ghz:.12g}",
+                    f"{output_amplitude[q_index, frequency_index]:.12g}",
+                ]
+            )
+
+print(f"Fourier transform data saved to '{fourier_csv}'")
+
 # A symmetric colour scale makes positive and negative intensity changes comparable.
 colour_limit = np.max(np.abs(finite_intensity))
 figure, axes = plt.subplots(layout="constrained")
@@ -108,14 +176,16 @@ figure.colorbar(
 fourier_figure, fourier_axes = plt.subplots(layout="constrained")
 fourier_plot = fourier_axes.pcolormesh(
     q_values,
-    frequencies[1:]*1000,
-    fourier_amplitude[:, 1:].T,
+    output_frequencies_ghz,
+    output_amplitude.T,
     shading="auto",
     cmap="cividis",
 )
 fourier_axes.set_xlabel(f"{column_names[0]} ({column_units[0]})")
 fourier_axes.set_ylabel("Frequency (GHz)")
 fourier_axes.set_title("Fourier amplitude along the delay axis")
+# # Match the axes box to the grid dimensions so every heatmap cell is square.
+# fourier_axes.set_box_aspect(len(output_frequencies_ghz) / len(q_values))
 fourier_figure.colorbar(
     fourier_plot,
     ax=fourier_axes,
