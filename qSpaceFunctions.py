@@ -158,7 +158,7 @@ def createQSpaceMap(
 
         qxCenters = selectedColumns[0, :]
         qyCenters = selectedRows[:, 0]
-        return qxCenters, qyCenters, intensity, delayScan
+        return qxCenters, qyCenters, intensity, delayScan, intensity
 
     # Remove the residual offset using the same background ROI, then exclude
     # beam-stop pixels from all subsequent calculations.
