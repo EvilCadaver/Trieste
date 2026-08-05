@@ -97,7 +97,7 @@ qxCenters, qyCenters, intensityQxQy, delayScan, imageCCD = createQSpaceMap(
     Q_SPACE_BINS_MAX=Q_SPACE_BINS_MAX,
 )
 
-# Plot detector image
+## Plot detector image
 valid = imageCCD[np.isfinite(imageCCD)]
 vmin = 0.1 * valid.min()
 vmax = 0.1 * valid.max()
@@ -109,8 +109,8 @@ detmap = axDet.imshow(
     vmin=vmin,
     vmax=vmax,
 )
-# Detector-array coordinates are (row, column) = (CY0, CX0). axhline and
-# axvline span the full axes, so the crosshair remains complete when zooming.
+## Detector-array coordinates are (row, column) = (CY0, CX0). axhline and
+## axvline span the full axes, so the crosshair remains complete when zooming.
 axDet.axhline(CY0, color="lime", linewidth=3.0, linestyle="-.")
 axDet.axvline(CX0, color="lime", linewidth=3.0, linestyle="-.")
 
