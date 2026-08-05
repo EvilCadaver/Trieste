@@ -6,7 +6,7 @@ from matplotlib.colors import ListedColormap
 
 ## Scan specific settings
 # Verbose reporting on file scan results
-verbose = True
+verbose = False
 from configs.FeRh_A06 import (
     folderData,
     sampleName,

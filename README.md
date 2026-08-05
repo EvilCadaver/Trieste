@@ -98,15 +98,16 @@ scan indices, assigned backgrounds, and a summary of the background groups.
 
 ### Grouping convention
 
-Normal scan indices are zero-based. A background set is expected immediately
-after normal scan indices `0, 5, 10, ...`. Background files are associated with
-an anchor only when their bunch IDs lie between that anchor and the next normal
-scan.
+Normal scan indices are zero-based. Normal and background files are merged into
+chronological order using the numeric bunch ID suffix in each filename;
+filesystem timestamps are not used. Every contiguous run of background files
+starts a new group, so grouping does not assume a fixed number of normal data
+files between background acquisitions.
 
-For each timing window, the first usable `NoProbe`, `OnlyProbe`, and `Dark` file
-forms the background set. An undersized attempt is rejected, but a later valid
-retry in the same window can complete the set. Incomplete windows are retained
-for diagnostics.
+Within each detected background run, the first usable `NoProbe`, `OnlyProbe`,
+and `Dark` file forms the background set. An undersized attempt is rejected,
+but a later valid retry in the same run can complete the set. Incomplete runs
+are retained for diagnostics.
 
 - Data before the first complete background set use the closest following set.
 - An incomplete middle or final window continues using the closest preceding

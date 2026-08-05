@@ -130,8 +130,8 @@ def scanFiles(
         if fileSize < minimumFileSize
     }
 
-    # Broken normal files remain in allDataFiles because their physical indices
-    # must still count when locating the 5*k background timing windows.
+    # Broken normal files remain in allDataFiles so physical acquisition indices
+    # and the chronology of background changes are preserved.
     allDataFiles = [
         file
         for _, scanName, file in fileRecords
@@ -142,44 +142,46 @@ def scanFiles(
         file: index
         for index, file in enumerate(allDataFiles)
     }
-    bunchIdByFile = {
-        file: bunchId
-        for bunchId, _, file in fileRecords
-    }
-    backgroundRecords = [
-        (bunchId, scanName, file)
-        for bunchId, scanName, file in fileRecords
-        if scanName in backgroundNames
-    ]
-
     backgroundGroups = []
     invalidBackgroundGroups = []
 
     # ------------------------------------------------------------------
-    # Stage 3: separate background attempts into acquisition-time windows.
+    # Stage 3: discover background acquisitions in chronological order.
     # ------------------------------------------------------------------
-    # A background attempt occurs after normal scan 5*k and before the next
-    # normal file. A later valid retry can replace a broken attempt in a window.
-    for anchorIndex in range(0, len(allDataFiles), 5):
-        # Normal indices 0, 5, 10, ... are the scans after which a background
-        # triplet is expected. The anchor remains in its own five-scan block.
-        anchorFile = allDataFiles[anchorIndex]
-        windowStartBunchId = bunchIdByFile[anchorFile]
-        nextDataIndex = anchorIndex + 1
+    # fileRecords is sorted exclusively by the numeric bunch ID suffix parsed
+    # from each filename. Filesystem timestamps are deliberately not used,
+    # because copying files between systems can alter them.
+    #
+    # Every contiguous run of background files is one acquisition window. A
+    # normal data file ends the current run, so the next detected background
+    # run starts a new group without assuming any fixed number of data files
+    # between groups.
+    backgroundWindows = []
+    currentBackgroundWindow = []
+    precedingDataIndex = -1
 
-        # Only files acquired between the anchor and the immediately following
-        # normal scan belong to this attempt. For the final normal scan there
-        # is no upper boundary, so infinity keeps any later backgrounds.
-        windowEndBunchId = (
-            bunchIdByFile[allDataFiles[nextDataIndex]]
-            if nextDataIndex < len(allDataFiles)
-            else float("inf")
+    for bunchId, scanName, file in fileRecords:
+        if scanName == "":
+            if currentBackgroundWindow:
+                backgroundWindows.append(
+                    (
+                        max(precedingDataIndex, 0),
+                        currentBackgroundWindow,
+                    )
+                )
+                currentBackgroundWindow = []
+            precedingDataIndex += 1
+        elif scanName in backgroundNames:
+            currentBackgroundWindow.append((bunchId, scanName, file))
+
+    # Preserve a background acquisition made after the final normal data file.
+    if currentBackgroundWindow and allDataFiles:
+        backgroundWindows.append(
+            (max(precedingDataIndex, 0), currentBackgroundWindow)
         )
-        windowBackgrounds = [
-            (bunchId, scanName, file)
-            for bunchId, scanName, file in backgroundRecords
-            if windowStartBunchId < bunchId < windowEndBunchId
-        ]
+
+    for anchorIndex, windowBackgrounds in backgroundWindows:
+        anchorFile = allDataFiles[anchorIndex]
 
         backgroundSet = {}
         extraBackgrounds = []
@@ -216,6 +218,7 @@ def scanFiles(
         target.append(group)
 
     backgroundGroups.sort(key=lambda group: group["anchorIndex"])
+    invalidBackgroundGroups.sort(key=lambda group: group["anchorIndex"])
 
     # ------------------------------------------------------------------
     # Stage 4: assign clean normal files to the closest applicable valid group.
