@@ -8,7 +8,7 @@ sampleName = "FeRh_A06"
 # Scan specific names: 0) Scan name; 1) Data aqusition name; 2) Background 1 acqusition name; 3) Background 2 acquistion name; 4) Background 3 acqusition name
 scanNames = ["Scan", "", "NoProbe", "OnlyProbe", "Dark"]
 # Scan number chosen for analysis
-scanNo = 28
+scanNo = 27
 # File size ratio for scan batches rejection
 minimumFileSizeRatio = 0.95
 # Refresh live figures after this many processed batches. Decimal values are
@@ -24,7 +24,7 @@ delayZero = -3096.49
 # Single scan index to analyse
 dataIndex = 63
 # Data indexes to exclude
-dataIndexesExcluded = [62]
+dataIndexesExcluded = []
 
 ## Scan measurement parameters
 N_BINN = 2                      #Binning of the detector
