@@ -163,7 +163,8 @@ def createQSpaceMap(
     # Remove the residual offset using the same background ROI, then exclude
     # beam-stop pixels from all subsequent calculations.
     levelBG = np.median(image[roiBG])
-    image = (image - levelBG) * maskBeamStop
+    imageCCD = (image - levelBG)
+    image = imageCCD * maskBeamStop
 
     # Calculate the outgoing ray and scattering vector for every detector pixel.
     height, width = image.shape
@@ -257,7 +258,7 @@ def createQSpaceMap(
     # returned grid follows plotting convention: rows are Qy, columns are Qx.
     intensity = intensityQxQy.T
 
-    return qxCenters, qyCenters, intensity, delayScan
+    return qxCenters, qyCenters, intensity, delayScan, imageCCD
 
 
 def createRadialIntensityProfile(

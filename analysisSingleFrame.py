@@ -25,7 +25,7 @@ h5DelayPath = "/photon_source/SeedLaser/Delay_line_2"
 # Delay zero setting
 delayZero = -3096.49
 # Single scan index to analyse
-dataIndex = 43
+dataIndex = 40
 
 ## Scan measurement parameters
 N_BINN = 2                      #Binning of the detector
@@ -77,7 +77,7 @@ results = scanFiles(
     minimumFileSizeRatio=minimumFileSizeRatio,
 )
 
-qxCenters, qyCenters, intensityQxQy, delayScan = createQSpaceMap(
+qxCenters, qyCenters, intensityQxQy, delayScan, imageCCD = createQSpaceMap(
     results=results,
     h5CCDImagePath=h5CCDImagePath,
     h5DelayPath=h5DelayPath,
@@ -96,6 +96,23 @@ qxCenters, qyCenters, intensityQxQy, delayScan = createQSpaceMap(
     maskBS=maskBS,
     Q_SPACE_BINS_MAX=Q_SPACE_BINS_MAX,
 )
+
+# Plot detector image
+valid = imageCCD[np.isfinite(imageCCD)]
+vmin = 0.1 * valid.min()
+vmax = 0.1 * valid.max()
+figDet, axDet = plt.subplots()
+detmap = axDet.imshow(
+    imageCCD,
+    origin="upper",
+    cmap="RdBu",
+    vmin=vmin,
+    vmax=vmax,
+)
+# Detector-array coordinates are (row, column) = (CY0, CX0). axhline and
+# axvline span the full axes, so the crosshair remains complete when zooming.
+axDet.axhline(CY0, color="lime", linewidth=3.0, linestyle="-.")
+axDet.axvline(CX0, color="lime", linewidth=3.0, linestyle="-.")
 
 if alignMasks:
     fig, ax = plt.subplots()
@@ -229,5 +246,6 @@ def moveFigure(fig, x, y):
 
 moveFigure(figQspace, 20, 50)
 moveFigure(figProfile, 600, 50)
+moveFigure(figDet, 1350, 50)
 
 plt.show()
