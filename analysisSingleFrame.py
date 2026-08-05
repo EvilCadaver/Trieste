@@ -47,7 +47,7 @@ roiAllignMasks = np.s_[200:1100, 0:300]
 roiBG = np.s_[400:450, 160:210] 
 
 ## Masking regions, will be added to the empty mask, add rectangles as np.s_[y0:y1,x0:x1] to the list [ ] structure.
-maskBS = [np.s_[379:647,0:222], np.s_[511:1024,29:120]]
+maskBS = [np.s_[342:612,0:222], np.s_[511:1024,24:118]]
 
 ## Q-space plot settings
 # Maximum number of reciprocal-space bins along the longer Qx/Qy dimension.
