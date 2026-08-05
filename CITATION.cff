@@ -4,5 +4,5 @@ title: "Elettra Sincrotrone Trieste EIS-Timer data-analysis tools"
 authors:
   - family-names: "Musiienko"
     given-names: "Denys"
-version: 0.0.5
-date-released: 2026-07-30
+version: 0.1.0
+date-released: 2026-08-05
