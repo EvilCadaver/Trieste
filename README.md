@@ -1,16 +1,21 @@
 # Elettra Sincrotrone Trieste EIS-Timer HDF5 Scan Analysis
 
-Tools for discovering FERMI HDF5 acquisitions, rejecting incomplete files,
-matching normal scans to their background acquisitions, correcting detector
-images, and projecting their intensities into reciprocal space.
+Python tools for discovering FERMI HDF5 acquisitions, rejecting incomplete
+files, matching scans to their background acquisitions, correcting detector
+images, projecting intensity into reciprocal space, and analysing radial
+profiles in the time and frequency domains.
 
-The main workflow is implemented in `analysis.py`. Reusable file discovery and
-background grouping are provided by `fileScan.py`.
+The processing flow is:
+
+```text
+fileScan.py
+    -> qSpaceFunctions.py
+        -> analysisSingleFrame.py
+        -> analysisMultiFrame.py
+            -> analysisFourierTransform.py
+```
 
 ## Requirements
-
-The file-discovery and grouping function uses only the Python standard library.
-The image-analysis scripts additionally require:
 
 - Python 3
 - NumPy
@@ -23,62 +28,57 @@ Install the Python dependencies with:
 python -m pip install numpy h5py matplotlib
 ```
 
-Some earlier analysis and detector-projection routines are provided as MATLAB
-files and require a suitable MATLAB installation.
-
 ## Expected data layout
 
-> [!IMPORTANT]
-> Change `folderData` in `analysis.py` to the directory where the scans for
-> your proposal are stored. At EIS-Timer, this will normally follow the UNC
-> path pattern
-> `//online4eis.esce.elettra.trieste.it/store/eis-timer/%ProposalNo%`, where
-> `%ProposalNo%` is the eight-digit proposal number beginning with the
-> four-digit year (`YYYYNNNN`). For example:
->
-> ```python
-> folderData = r"//online4eis.esce.elettra.trieste.it/store/eis-timer/20251234"
-> ```
+Set `folderData` near the beginning of `analysisSingleFrame.py` or
+`analysisMultiFrame.py` to the directory containing the sample folders. At
+EIS-Timer, this normally follows the UNC path pattern
+`//online4eis.esce.elettra.trieste.it/store/eis-timer/%ProposalNo%`, where
+`%ProposalNo%` is the eight-digit proposal number beginning with the four-digit
+year (`YYYYNNNN`). For example:
 
-For a sample called `FeRh_A04` and scan number `68`, the scanner expects:
+```python
+folderData = r"//online4eis.esce.elettra.trieste.it/store/eis-timer/20251234"
+```
+
+For sample `FeRh_A04` and scan number `68`, the expected directory structure is:
 
 ```text
 folderData/
-└── FeRh_A04/
-    ├── Scan_068/
-    │   └── rawdata/
-    │       ├── Scan_068_326409867.h5
-    │       └── ...
-    ├── Scan_068_NoProbe/
-    │   └── rawdata/
-    │       └── Scan_068_NoProbe_326428931.h5
-    ├── Scan_068_OnlyProbe/
-    │   └── rawdata/
-    │       └── Scan_068_OnlyProbe_326430793.h5
-    └── Scan_068_Dark/
-        └── rawdata/
-            └── Scan_068_Dark_326432632.h5
+`-- FeRh_A04/
+    |-- Scan_068/
+    |   `-- rawdata/
+    |       |-- Scan_068_326409867.h5
+    |       `-- ...
+    |-- Scan_068_NoProbe/
+    |   `-- rawdata/
+    |       `-- Scan_068_NoProbe_326428931.h5
+    |-- Scan_068_OnlyProbe/
+    |   `-- rawdata/
+    |       `-- Scan_068_OnlyProbe_326430793.h5
+    `-- Scan_068_Dark/
+        `-- rawdata/
+            `-- Scan_068_Dark_326432632.h5
 ```
 
-The numeric value at the end of each filename is treated as the acquisition's
-first bunch ID and determines chronological order. The scan number may contain
-any number of leading zeroes on disk, so `scanNo=68` also matches `Scan_068` and
-`Scan_00068`.
+The numeric suffix of each filename is treated as the acquisition's first
+bunch ID and determines chronological order. Scan numbers may have any number
+of leading zeroes, so `scanNo=68` matches both `Scan_068` and `Scan_00068`.
 
-The `scanNames` argument describes the naming convention:
+The acquisition naming convention is configured as:
 
 ```python
 scanNames = ["Scan", "", "NoProbe", "OnlyProbe", "Dark"]
 ```
 
 - `scanNames[0]` is the common folder and filename prefix.
-- `scanNames[1]` is the normal acquisition suffix. It is empty, so no extra
-  underscore is added.
+- `scanNames[1]` is the normal-acquisition suffix. An empty string means that
+  no additional suffix is used.
 - `scanNames[2:]` are the required background acquisition types.
 
-## Scanning and grouping files
+## File discovery and background grouping
 
-Import `scanFiles` into another script located in the same directory:
+`fileScan.py` provides the reusable `scanFiles()` function:
 
 ```python
 from fileScan import scanFiles
@@ -93,174 +93,170 @@ results = scanFiles(
 )
 ```
 
-Set `verbose=True` to print file sizes, rejected acquisitions, every physical
-normal-scan index, its assigned backgrounds, and a summary of all background
-groups.
+Set `verbose=True` to print discovered files, rejected acquisitions, physical
+scan indices, assigned backgrounds, and a summary of the background groups.
 
 ### Grouping convention
 
-Normal scan indices are zero-based. A background triplet is expected immediately
+Normal scan indices are zero-based. A background set is expected immediately
 after normal scan indices `0, 5, 10, ...`. Background files are associated with
 an anchor only when their bunch IDs lie between that anchor and the next normal
 scan.
 
 For each timing window, the first usable `NoProbe`, `OnlyProbe`, and `Dark` file
 forms the background set. An undersized attempt is rejected, but a later valid
-retry inside the same timing window can repair the set. A window missing any
-required background type is retained for diagnostics and is not used directly.
-
-Data assignment handles incomplete background windows as follows:
+retry in the same window can complete the set. Incomplete windows are retained
+for diagnostics.
 
 - Data before the first complete background set use the closest following set.
 - An incomplete middle or final window continues using the closest preceding
   complete set.
-- If no complete background set exists, the clean scans are reported in
+- If no complete set exists, the affected scans are reported in
   `filesWithoutBackground`.
 
 ### Broken-file detection
 
 The median size of all matching normal and background files is used as the
-reference size. A file is classified as broken when:
+reference. A file is classified as broken when:
 
 ```text
-file size < median file size × minimumFileSizeRatio
+file size < median file size * minimumFileSizeRatio
 ```
 
 With the default ratio of `0.95`, files more than 5% smaller than the median are
-rejected. Broken normal files remain in `allDataFiles` so their physical indices
-still count, but they are excluded from `usableDataFiles` and from each group's
-`dataFiles` list.
+rejected. Broken normal files remain in `allDataFiles` so physical indices do
+not shift, but they are excluded from the usable data.
 
-## Returned results
+### Returned results
 
-`scanFiles()` returns a dictionary. Its main entries are:
+The main entries returned by `scanFiles()` are:
 
 | Key | Contents |
 | --- | --- |
-| `backgroundGroups` | Complete background groups and their assigned clean data files |
+| `backgroundGroups` | Complete background groups and assigned clean data files |
 | `usableDataFiles` | Clean data files with a complete background assignment |
-| `backgroundsForFile` | Mapping from each usable data path to its background dictionary |
+| `backgroundsForFile` | Mapping from each usable data path to its backgrounds |
 | `allDataFiles` | Every normal scan in physical order, including broken files |
 | `dataFiles` | Normal scans that pass the file-size check |
 | `brokenFiles` | All normal or background files rejected by size |
 | `brokenDataFiles` | Broken normal scans only |
 | `invalidBackgroundGroups` | Incomplete background timing windows |
-| `filesWithoutBackground` | Clean scans for which no complete set exists |
+| `filesWithoutBackground` | Clean scans without a complete background set |
 | `filesByScanName` | Chronological files separated by acquisition type |
 | `fileSizes` | Mapping from every discovered path to its size in bytes |
 | `referenceFileSize` | Median file size used as the reference |
 | `minimumFileSize` | Calculated rejection threshold in bytes |
 
-Each item in `backgroundGroups` has this structure:
+Use `allDataFiles[dataIndex]` when `dataIndex` must refer to the physical
+acquisition order. Using an index into `usableDataFiles` can select the wrong
+acquisition because rejected files are absent from that list.
 
-```python
-{
-    "anchorIndex": 0,
-    "anchorFile": Path(".../Scan_068_....h5"),
-    "backgrounds": {
-        "NoProbe": Path(".../Scan_068_NoProbe_....h5"),
-        "OnlyProbe": Path(".../Scan_068_OnlyProbe_....h5"),
-        "Dark": Path(".../Scan_068_Dark_....h5"),
-    },
-    "dataFiles": [Path("..."), ...],
-    "extraBackgrounds": [],
-    "rejectedBackgrounds": [],
-}
+## Reciprocal-space functions
+
+`qSpaceFunctions.py` contains the shared numerical operations used by both
+frame-analysis scripts:
+
+- `createQSpaceMap()` reads a scan and its assigned backgrounds, normalizes and
+  subtracts the backgrounds, applies detector masks, calculates scattering
+  vectors, and bins the corrected intensity onto a regular Qx/Qy grid.
+- `createRadialIntensityProfile()` integrates Q-space intensity into radial
+  shells within the configured angular sector and its symmetry-equivalent
+  directions.
+- `subtractPolynomialBackground()` applies radial cutoffs, fits a polynomial
+  background, and returns the background-subtracted profile.
+
+Q-space coordinates and radial distances are expressed in nm^-1. Empty bins
+remain `NaN` instead of being represented as zero intensity.
+
+## Single-frame analysis
+
+`analysisSingleFrame.py` analyses one physical acquisition selected by
+`dataIndex`. Configure the scan location, detector geometry, background ROI,
+beam-stop masks, Q-space resolution, and radial-profile sector near the top of
+the script, then run:
+
+```powershell
+python analysisSingleFrame.py
 ```
 
-## Selecting one scan and its backgrounds
+The script:
 
-Use `allDataFiles` when the index must refer to the original physical acquisition
-order. Do not use `usableDataFiles[index]` for this purpose, because rejected
-files are absent from that list and later indices can shift.
+1. Discovers the scan and its background groups with `scanFiles()`.
+2. Corrects the selected detector image with its assigned backgrounds.
+3. Projects the detector data onto a Qx/Qy intensity map.
+4. Optionally overlays the angular sectors used for radial integration.
+5. Plots the summed radial intensity profile versus `|Q|`.
 
-```python
-scanIndex = 3
+This workflow is useful for checking detector geometry, masks, angular sectors,
+and radial binning before processing the complete scan.
 
-try:
-    scanFilePath = results["allDataFiles"][scanIndex]
-except IndexError:
-    print(f"Scan index {scanIndex} does not exist")
-else:
-    if scanFilePath in results["brokenFiles"]:
-        print("Scan is broken")
-    elif scanFilePath in results["filesWithoutBackground"]:
-        print("No suitable background set")
-    else:
-        backgrounds = results["backgroundsForFile"].get(scanFilePath)
+## Multi-frame analysis
 
-        if backgrounds is None:
-            print("No background assignment found")
-        else:
-            print("Scan:", scanFilePath)
-            print("NoProbe:", backgrounds["NoProbe"])
-            print("OnlyProbe:", backgrounds["OnlyProbe"])
-            print("Dark:", backgrounds["Dark"])
+`analysisMultiFrame.py` applies the same correction and Q-space projection to
+the usable acquisitions in a scan. Configure its input, detector, mask,
+profile, cutoff, background-fit, and output settings, then run:
+
+```powershell
+python analysisMultiFrame.py
 ```
 
-The returned values are `pathlib.Path` objects and can be passed directly to
-`h5py.File`:
+The script builds a background-subtracted radial profile for every retained
+delay, handles excluded, duplicate, broken, and missing acquisitions, and
+creates a Q-versus-delay heatmap. It saves both a PNG and a CSV in `folderOutput`.
 
-```python
-import h5py
+The CSV contains a metadata header followed by:
 
-with h5py.File(scanFilePath, "r") as h5:
-    imageScan = h5["/CCD/Image"][...]
+```text
+***DATA***
+Q,dt,Intensity
+nm^-1,ps,a.u.
 ```
 
-## Detector and reciprocal-space analysis
+This CSV is the input expected by `analysisFourierTransform.py`.
 
-`analysis.py` performs the complete single-acquisition analysis. Configure the
-data location, sample and scan names, `scanNo`, and `dataIndex` near the top of
-the file. The script then:
+## Fourier analysis
 
-1. Calls `scanFiles()` and validates the selected physical acquisition index.
-2. Loads the scan and its assigned `NoProbe`, `OnlyProbe`, and `Dark`
-   acquisitions.
-3. Normalizes the backgrounds using `roiBG`, forms the differential image, and
-   applies the regions in `maskBS`.
-4. Displays the corrected detector image.
-5. Calculates each detector pixel's scattering vector in the sample coordinate
-   system:
+`analysisFourierTransform.py` transforms every Q profile along the delay axis.
+Set `folderData` and `analysisName` to a Q-versus-delay CSV produced by
+`analysisMultiFrame.py`, then run:
 
-   ```python
-   Q = 2 * np.pi / LAMBDA * (S_f - S_i)
-   ```
+```powershell
+python analysisFourierTransform.py
+```
 
-6. Optionally displays the detector surface in three-dimensional reciprocal
-   space when `Q3D_PLOT = True`. `Q3D_STEP` controls the pixel subsampling used
-   to keep that plot responsive.
-7. Rebins the valid intensities onto a regular Qx/Qy grid and plots the mean
-   intensity in each occupied bin. `Q_SPACE_BINS_MAX` sets the maximum number
-   of square reciprocal-space bins along the projection's longer dimension;
-   empty bins remain undefined rather than being displayed as zero intensity.
+Before the FFT, the script linearly interpolates missing delay samples for each
+Q, subtracts the trace mean, and applies a Hann window. It computes a real,
+one-sided FFT, omits the zero-frequency bin, and reports frequency in GHz.
 
-Reciprocal-space axes are displayed in nm^-1. Under the coordinate convention
-used by the script, increasing detector column primarily maps toward decreasing
-Qx, while increasing detector row maps toward increasing Qy. Since the detector
-image is displayed with its origin at the top, the Qx/Qy projection naturally
-appears horizontally and vertically flipped relative to that image.
+Two files are saved beside the input CSV:
 
-Matplotlib displays are sequential. Close the detector-image window to continue
-to the optional 3D view and the binned Qx/Qy plot.
+- `<input stem>_Fourier.png` contains the frequency-versus-Q heatmap.
+- `<input stem>_Fourier.csv` contains the relevant sample and processing
+  metadata followed by `Q,f,Intensity` data in `nm^-1,GHz,a.u.`.
 
-## Repository files
+## Supported repository files
 
-- `analysis.py` — detector correction and reciprocal-space analysis workflow.
-- `fileScan.py` — reusable discovery, validation, grouping, and reporting logic.
+- `fileScan.py` — file discovery, validation, and background grouping.
+- `qSpaceFunctions.py` — detector correction, Q-space projection, radial
+  integration, and polynomial background subtraction.
+- `analysisSingleFrame.py` — interactive inspection of one acquisition.
+- `analysisMultiFrame.py` — complete delay-scan processing and Q-versus-delay
+  export.
+- `analysisFourierTransform.py` — time-axis Fourier analysis and
+  frequency-versus-Q export.
 
 ## AI-assisted development
 
-This project was developed with assistance from OpenAI Codex. The tool was
-used for code generation, refactoring, documentation, and debugging. All
-AI-assisted changes were reviewed and tested by the project maintainer, who
-remains responsible for the final implementation.
+This project was developed with assistance from OpenAI Codex for code
+generation, refactoring, documentation, and debugging. All assisted changes
+were reviewed and tested by the project maintainer, who remains responsible for
+the final implementation.
 
 ## Licence
 
 This project is licensed under **EUPL-1.2-or-later**. See `LICENSE` for the
 project licensing statement and `EUPL` for the full official EUPL 1.2 text.
 
-When distributing or communicating the work or a derivative, retain the required
-copyright and licence notices, identify modifications, and provide the source as
-required by the EUPL.
+When distributing or communicating the work or a derivative, retain the
+required copyright and licence notices, identify modifications, and provide the
+source as required by the EUPL.
