@@ -111,7 +111,7 @@ fourier_plot = fourier_axes.pcolormesh(
     frequencies[1:]*1000,
     fourier_amplitude[:, 1:].T,
     shading="auto",
-    cmap="magma",
+    cmap="cividis",
 )
 fourier_axes.set_xlabel(f"{column_names[0]} ({column_units[0]})")
 fourier_axes.set_ylabel("Frequency (GHz)")
@@ -121,5 +121,9 @@ fourier_figure.colorbar(
     ax=fourier_axes,
     label=f"Fourier amplitude ({column_units[2]})",
 )
+
+fourier_image = fileData.with_name(f"{fileData.stem}_Fourier.png")
+fourier_figure.savefig(fourier_image, dpi=300)
+print(f"Fourier transform image saved to '{fourier_image}'")
 
 plt.show()
