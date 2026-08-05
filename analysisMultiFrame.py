@@ -191,16 +191,16 @@ plotProfileAngles = True
 # Choose the highlight colour
 plotProfileAnglesColour = r"green"
 # Angle from Qx in deg
-ZETA = 45
+ZETA = 0
 # Acceptance angle in deg
-D_ZETA = 20
+D_ZETA = 180
 # Symmetry
-ZETA_SYMMETRY = 4
+ZETA_SYMMETRY = 2
 # Radial step bin
 RADIAL_STEP_BIN = 1
 # Q-distance cutoffs in percent
 Q_LOW_CUTOFF = 15
-Q_HIGH_CUTOFF = 90
+Q_HIGH_CUTOFF = 95
 # Polynomial background fitted only after applying both Q cutoffs
 BACKGROUND_NPOLY = 3
 

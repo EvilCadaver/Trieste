@@ -5,7 +5,7 @@ from matplotlib.colors import TwoSlopeNorm
 from pathlib import Path
 
 folderData = r"./Output_DS/FeRh_A04"
-analysisName = r"FeRh_A04_Scan_068_Q_vs_delay_a45deg_d20deg_sym4.csv"
+analysisName = r"FeRh_A04_Scan_068_Q_vs_delay_a0deg_d180deg_sym2.csv"
 fileData = Path(folderData) / analysisName
 
 if not fileData.exists():
