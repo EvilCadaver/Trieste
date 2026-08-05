@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from pathlib import Path
+import warnings
 
 
 def getSystemListDelimiter():
@@ -177,8 +178,8 @@ from configs.FeRh_A06 import (
 # Output folder
 folderOutput = Path(r"./Output_DS")
 folderOutput = folderOutput / sampleName
-# Duplicate delays handling rule
-handlingDuplicateDelays = "keep first"
+# Duplicate delays handling rule: "keep first", "propagate delay"
+handlingDuplicateDelays = "propagate delay"
 
 ## Calling the folder scanning function
 results = scanFiles(
@@ -270,6 +271,7 @@ for dataIndex, dataFilePath in enumerate(allDataFiles):
                 qyCenters,
                 intensityQxQy,
                 delayScan,
+                _,
             ) = createQSpaceMap(
                 results=results,
                 h5CCDImagePath=h5CCDImagePath,
@@ -581,38 +583,14 @@ duplicateDelays = {
 }
 
 # Infer the intended delay step from the median positive spacing between unique
-# delays. Gaps larger than this step are reported as suspected missing scans;
-# they are diagnostic only and are not inserted into intensityProfiles.
+# delays. Gaps that are integer multiples of this step identify delay values
+# that should have been present in the acquisition sequence.
 uniqueDelays = np.array(sorted(delayToIndexes), dtype=float)
 suspectedMissingScans = []
 nominalDelayStep = None
 
 if uniqueDelays.size == 0:
     raise RuntimeError("No finite delay values were available for export")
-
-# Select which physical acquisitions construct the final figure and CSV.
-# Each future duplicate-handling rule should define all three values below.
-match handlingDuplicateDelays:
-    case "keep first":
-        # The first physical scan wins even if its profile is NaN because it
-        # was excluded or unusable. A later duplicate cannot replace it.
-        figureDelays = uniqueDelays.copy()
-        keptDataIndexes = np.array(
-            [delayToIndexes[delayScan][0] for delayScan in figureDelays],
-            dtype=int,
-        )
-        discardedDuplicateIndexes = sorted(
-            dataIndex
-            for dataIndexes in duplicateDelays.values()
-            for dataIndex in dataIndexes[1:]
-        )
-    case _:
-        raise ValueError(
-            "Unknown handlingDuplicateDelays value "
-            f"{handlingDuplicateDelays!r}. Available choice: 'keep first'"
-        )
-
-figureIntensityProfiles = intensityProfiles[:, keptDataIndexes]
 
 if uniqueDelays.size > 1:
     uniqueDelaySteps = np.diff(uniqueDelays)
@@ -646,6 +624,89 @@ if uniqueDelays.size > 1:
                             "rightIndexes": delayToIndexes[float(rightDelay)],
                         }
                     )
+
+missingDelayValues = np.array(
+    [missingScan["delay"] for missingScan in suspectedMissingScans],
+    dtype=float,
+)
+
+# "keep first" is also the safe baseline for "propagate delay". The first
+# acquisition at every recorded delay is retained, and all later acquisitions
+# at that same delay are initially considered unused duplicate batches.
+figureDelays = uniqueDelays.copy()
+keptDataIndexes = np.array(
+    [delayToIndexes[delayScan][0] for delayScan in figureDelays],
+    dtype=int,
+)
+duplicateCandidateIndexes = sorted(
+    dataIndex
+    for dataIndexes in duplicateDelays.values()
+    for dataIndex in dataIndexes[1:]
+)
+discardedDuplicateIndexes = duplicateCandidateIndexes.copy()
+missingDelayValuesToInsert = missingDelayValues.copy()
+propagatedDelayAssignments = []
+appliedDuplicateDelayHandling = handlingDuplicateDelays
+
+match handlingDuplicateDelays:
+    case "keep first":
+        pass
+
+    case "propagate delay":
+        if len(duplicateCandidateIndexes) < missingDelayValues.size:
+            appliedDuplicateDelayHandling = "keep first"
+            warnings.warn(
+                "The 'propagate delay' rule found "
+                f"{missingDelayValues.size} missing delays but only "
+                f"{len(duplicateCandidateIndexes)} unused duplicate batches. "
+                "Falling back to 'keep first'.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        else:
+            # Pair physical batches and missing delays in increasing order. For
+            # scan 27 this maps 38->330, 39->340, 41->360, and 42->370 ps.
+            propagatedIndexes = np.array(
+                duplicateCandidateIndexes[:missingDelayValues.size],
+                dtype=int,
+            )
+            figureDelays = np.concatenate(
+                (figureDelays, missingDelayValues)
+            )
+            keptDataIndexes = np.concatenate(
+                (keptDataIndexes, propagatedIndexes)
+            )
+            figureDelayOrder = np.argsort(figureDelays, kind="stable")
+            figureDelays = figureDelays[figureDelayOrder]
+            keptDataIndexes = keptDataIndexes[figureDelayOrder]
+
+            propagatedDelayAssignments = [
+                (
+                    int(dataIndex),
+                    float(delayScans[dataIndex]),
+                    float(propagatedDelay),
+                )
+                for dataIndex, propagatedDelay in zip(
+                    propagatedIndexes,
+                    missingDelayValues,
+                )
+            ]
+            propagatedIndexSet = set(propagatedIndexes.tolist())
+            discardedDuplicateIndexes = [
+                dataIndex
+                for dataIndex in duplicateCandidateIndexes
+                if dataIndex not in propagatedIndexSet
+            ]
+            missingDelayValuesToInsert = np.array([], dtype=float)
+
+    case _:
+        raise ValueError(
+            "Unknown handlingDuplicateDelays value "
+            f"{handlingDuplicateDelays!r}. Available choices: "
+            "'keep first', 'propagate delay'"
+        )
+
+figureIntensityProfiles = intensityProfiles[:, keptDataIndexes]
 
 duplicateFigures = []
 
@@ -713,19 +774,25 @@ if suspectedMissingScans:
 else:
     print("\nNo internal missing delay steps detected.")
 
-# Insert every inferred missing delay as an explicit all-NaN column. This makes
-# gaps visible in the final heatmap and keeps the exported table faithful to
-# the plotted data instead of stretching neighbouring scans across each gap.
-missingDelayValues = np.array(
-    [missingScan["delay"] for missingScan in suspectedMissingScans],
-    dtype=float,
-)
-if missingDelayValues.size:
+if propagatedDelayAssignments:
+    print("\nPropagated duplicate batches to missing delays:")
+    for dataIndex, recordedDelay, propagatedDelay in propagatedDelayAssignments:
+        print(
+            f"  Data index {dataIndex}: recorded {recordedDelay:g} ps, "
+            f"assigned {propagatedDelay:g} ps"
+        )
+
+# Under "keep first", or after a propagation fallback, represent every still
+# unfilled delay as an explicit NaN column. Successful propagation leaves this
+# list empty because real profile columns now occupy all inferred delay steps.
+if missingDelayValuesToInsert.size:
     missingProfiles = np.full(
-        (profileDistance.size, missingDelayValues.size),
+        (profileDistance.size, missingDelayValuesToInsert.size),
         np.nan,
     )
-    figureDelays = np.concatenate((figureDelays, missingDelayValues))
+    figureDelays = np.concatenate(
+        (figureDelays, missingDelayValuesToInsert)
+    )
     figureIntensityProfiles = np.concatenate(
         (figureIntensityProfiles, missingProfiles),
         axis=1,
@@ -799,10 +866,17 @@ metadata = [
     ("Last data batch physical index", lastUsedIndex),
     ("Last data batch file", lastUsedFile),
     ("Last data batch file modification time", fileModificationTime(lastUsedFile)),
-    ("handlingDuplicateDelays", handlingDuplicateDelays),
+    ("handlingDuplicateDelays requested", handlingDuplicateDelays),
+    ("handlingDuplicateDelays applied", appliedDuplicateDelayHandling),
+    ("Propagated delay assignments (index, recorded ps, assigned ps)",
+     propagatedDelayAssignments),
     ("Physical data indexes represented", keptDataIndexes.tolist()),
     ("Discarded duplicate physical indexes", discardedDuplicateIndexes),
-    ("Inserted missing delays as NaN (ps)", missingDelayValues.tolist()),
+    ("Detected missing delays (ps)", missingDelayValues.tolist()),
+    (
+        "Inserted missing delays as NaN (ps)",
+        missingDelayValuesToInsert.tolist(),
+    ),
     ("Broken physical data indexes", brokenDataIndexes),
     ("Physical data indexes without background", indexesWithoutBackground),
     ("folderData", folderData),

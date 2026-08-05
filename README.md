@@ -205,6 +205,12 @@ The script builds a background-subtracted radial profile for every retained
 delay, handles excluded, duplicate, broken, and missing acquisitions, and
 creates a Q-versus-delay heatmap. It saves both a PNG and a CSV in `folderOutput`.
 
+`handlingDuplicateDelays` controls duplicate delay metadata. `"keep first"`
+keeps the first batch at each recorded delay and represents inferred gaps as
+NaN. `"propagate delay"` assigns otherwise-unused duplicate batches to inferred
+missing delays in chronological order. If there are fewer duplicate batches
+than missing delays, it warns and falls back to `"keep first"`.
+
 The CSV contains a metadata header followed by:
 
 ```text

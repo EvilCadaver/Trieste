@@ -5,6 +5,7 @@ Output/
 .codex/
 *.csv
 Output_DS/
+*.log
 
 # Python bytecode and caches
 __pycache__/

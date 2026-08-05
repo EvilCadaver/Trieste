@@ -63,7 +63,7 @@ ZETA_SYMMETRY = 4
 # Radial step bin
 RADIAL_STEP_BIN = 2
 # Q-distance cutoffs in percent
-Q_LOW_CUTOFF = 15
+Q_LOW_CUTOFF = 10
 Q_HIGH_CUTOFF = 95
 # Polynomial background fitted only after applying both Q cutoffs
 BACKGROUND_NPOLY = 3
