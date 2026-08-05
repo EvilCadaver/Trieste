@@ -54,6 +54,20 @@ def formatSetting(value):
     return str(value)
 
 
+def normalizeFigureUpdateInterval(value):
+    """Return a finite numeric update interval as an integer of at least one."""
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value,
+        (int, float, np.integer, np.floating),
+    ):
+        raise TypeError("updateFiguresInterval must be a number")
+
+    if not np.isfinite(value):
+        raise ValueError("updateFiguresInterval must be finite")
+
+    return max(1, int(round(float(value))))
+
+
 def fileModificationTime(filePath):
     """Return a timezone-aware ISO timestamp for an acquired data file."""
     return datetime.fromtimestamp(
@@ -146,6 +160,7 @@ from configs.FeRh_A06 import (
     scanNames,
     scanNo,
     minimumFileSizeRatio,
+    updateFiguresInterval,
     h5CCDImagePath,
     h5DelayPath,
     delayZero,
@@ -173,6 +188,16 @@ from configs.FeRh_A06 import (
     Q_HIGH_CUTOFF,
     BACKGROUND_NPOLY
 )
+
+# Normalize the display setting once. Analysis still runs for every batch; only
+# the comparatively expensive Matplotlib updates are performed at this cadence.
+requestedUpdateFiguresInterval = updateFiguresInterval
+updateFiguresInterval = normalizeFigureUpdateInterval(updateFiguresInterval)
+if updateFiguresInterval != requestedUpdateFiguresInterval:
+    print(
+        "Adjusted updateFiguresInterval from "
+        f"{requestedUpdateFiguresInterval!r} to {updateFiguresInterval}"
+    )
 
 ## Output files settings
 # Output folder
@@ -253,6 +278,7 @@ tickIndexes = np.unique(
 )
 
 plt.ion()
+figureUpdateCounter = 0
 
 for dataIndex, dataFilePath in enumerate(allDataFiles):
     skippedReason = None
@@ -324,23 +350,6 @@ for dataIndex, dataFilePath in enumerate(allDataFiles):
             f"{skippedReason}; storing NaN"
         )
 
-        # Once plotting has been initialized, blank the per-scan displays so a
-        # skipped scan is not mistaken for the preceding valid acquisition.
-        if heatmapQspace is not None:
-            heatmapQspace.set_array(
-                np.full(heatmapQspace.get_array().shape, np.nan)
-            )
-            lineProfile.set_ydata(np.full(distance.shape, np.nan))
-            lineBackground.set_ydata(np.full(distance.shape, np.nan))
-            lineCorrectedProfile.set_ydata(
-                np.full(distance.shape, np.nan)
-            )
-            axQspace.set_title(
-                f"Scan {scanNo}, data batch {dataIndex}: {skippedReason}"
-            )
-            axProfile.set_title(
-                f"Data batch {dataIndex}: {skippedReason}"
-            )
     else:
         delayScans[dataIndex] = delayScan
 
@@ -515,6 +524,38 @@ for dataIndex, dataFilePath in enumerate(allDataFiles):
                     f"Data [{dataIndex}] produced incompatible Q/profile axes"
                 )
 
+        intensityProfiles[:, dataIndex] = correctedIntensity[cutoffMask]
+
+    # Count physical batches, including skipped ones. The last condition forces
+    # a final display refresh even when the scan count is not an exact multiple
+    # of updateFiguresInterval.
+    figureUpdateCounter += 1
+    figuresUpdateDue = (
+        figureUpdateCounter >= updateFiguresInterval
+        or dataIndex == numberOfScans - 1
+    )
+
+    if figuresUpdateDue and heatmapProfiles is not None:
+        figureUpdateCounter = 0
+
+        if skippedReason is not None:
+            # Blank the per-scan views so a skipped acquisition is not mistaken
+            # for the most recently displayed valid acquisition.
+            heatmapQspace.set_array(
+                np.full(heatmapQspace.get_array().shape, np.nan)
+            )
+            lineProfile.set_ydata(np.full(distance.shape, np.nan))
+            lineBackground.set_ydata(np.full(distance.shape, np.nan))
+            lineCorrectedProfile.set_ydata(
+                np.full(distance.shape, np.nan)
+            )
+            axQspace.set_title(
+                f"Scan {scanNo}, data batch {dataIndex}: {skippedReason}"
+            )
+            axProfile.set_title(
+                f"Data batch {dataIndex}: {skippedReason}"
+            )
+        else:
             heatmapQspace.set_array(intensityQxQy.ravel())
             finiteIntensity = intensityQxQy[np.isfinite(intensityQxQy)]
             colourLimit = np.percentile(np.abs(finiteIntensity), 99)
@@ -524,20 +565,17 @@ for dataIndex, dataFilePath in enumerate(allDataFiles):
             lineProfile.set_ydata(sumIntensity)
             lineBackground.set_ydata(backgroundIntensity)
             lineCorrectedProfile.set_ydata(correctedIntensity)
+            axQspace.set_title(
+                f"Scan {scanNo}, data batch {dataIndex}, "
+                f"delay={delayScan:g} ps"
+            )
+            axProfile.set_title(
+                f"Zetta={ZETA:g} deg, symmetry={ZETA_SYMMETRY}, "
+                f"acceptance={D_ZETA:g} deg, delay={delayScan:g} ps"
+            )
+            axProfile.relim()
+            axProfile.autoscale_view()
 
-        intensityProfiles[:, dataIndex] = correctedIntensity[cutoffMask]
-        axQspace.set_title(
-            f"Scan {scanNo}, data batch {dataIndex}, "
-            f"delay={delayScan:g} ps"
-        )
-        axProfile.set_title(
-            f"Zetta={ZETA:g} deg, symmetry={ZETA_SYMMETRY}, "
-            f"acceptance={D_ZETA:g} deg, delay={delayScan:g} ps"
-        )
-        axProfile.relim()
-        axProfile.autoscale_view()
-
-    if heatmapProfiles is not None:
         heatmapProfiles.set_data(intensityProfiles)
         finiteProfiles = intensityProfiles[np.isfinite(intensityProfiles)]
         if finiteProfiles.size:
@@ -885,6 +923,7 @@ metadata = [
     ("scanNames", scanNames),
     ("scanNo", scanNo),
     ("minimumFileSizeRatio", minimumFileSizeRatio),
+    ("updateFiguresInterval", updateFiguresInterval),
     ("verbose", verbose),
     ("h5CCDImagePath", h5CCDImagePath),
     ("h5DelayPath", h5DelayPath),

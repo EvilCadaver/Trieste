@@ -1,8 +1,6 @@
 from fileScan import scanFiles
 from qSpaceFunctions import createQSpaceMap, createRadialIntensityProfile
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
 
 ## Scan specific settings
 # Verbose reporting on file scan results
@@ -47,6 +45,40 @@ results = scanFiles(
     verbose=verbose,
     minimumFileSizeRatio=minimumFileSizeRatio,
 )
+
+# Validate the selected physical batch before importing Matplotlib. In
+# particular, this prevents VS Code from starting its Qt event-loop integration
+# when there is no valid detector image to display.
+if isinstance(dataIndex, (bool, np.bool_)) or not isinstance(
+    dataIndex,
+    (int, np.integer),
+):
+    raise TypeError("dataIndex must be an integer")
+
+if dataIndex < 0 or dataIndex >= len(results["allDataFiles"]):
+    raise IndexError(f"Scan index {dataIndex} does not exist")
+
+selectedDataFile = results["allDataFiles"][dataIndex]
+
+if selectedDataFile in results["brokenFiles"]:
+    print(
+        f"WARNING: Data [{dataIndex}] is broken: {selectedDataFile}\n"
+        "Single-frame analysis stopped before plotting."
+    )
+    raise SystemExit(0)
+
+if selectedDataFile in results["filesWithoutBackground"]:
+    print(
+        f"WARNING: Data [{dataIndex}] has no suitable background set: "
+        f"{selectedDataFile}\n"
+        "Single-frame analysis stopped before plotting."
+    )
+    raise SystemExit(0)
+
+# Importing pyplot can initialize a GUI backend. Keep it below every condition
+# that intentionally exits without creating a figure.
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
 
 qxCenters, qyCenters, intensityQxQy, delayScan, imageCCD = createQSpaceMap(
     results=results,

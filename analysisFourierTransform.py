@@ -14,8 +14,8 @@ from matplotlib.colors import TwoSlopeNorm
 from pathlib import Path
 
 # Input selection. Output files are created in the same directory as this CSV.
-folderData = r"./Output_DS/FeRh_A04"
-analysisName = r"FeRh_A04_Scan_068_Q_vs_delay_a45deg_d20deg_sym4.csv"
+folderData = r"./Output_DS/FeRh_A06"
+analysisName = r"FeRh_A06_Scan_027_Q_vs_delay_a0deg_d20deg_sym4.csv"
 fileData = Path(folderData) / analysisName
 
 if not fileData.exists():
