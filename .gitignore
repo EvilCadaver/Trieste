@@ -6,6 +6,7 @@ Output/
 *.csv
 Output_DS/
 *.log
+AGENTS.md
 
 # Python bytecode and caches
 __pycache__/

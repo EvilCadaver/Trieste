@@ -202,16 +202,16 @@ def createQSpaceMap(
     )
 
     # Scattered ray coordinates in sample's reciprocal space
-    q = 2 * np.pi / LAMBDA * (s_f - s_i)
+    Q = 2 * np.pi / LAMBDA * (s_f - s_i)
 
     # Flatten only usable, finite detector samples before histogramming them.
     valid = (
         maskBeamStop
         & np.isfinite(image)
-        & np.all(np.isfinite(q[..., :2]), axis=-1)
+        & np.all(np.isfinite(Q[..., :2]), axis=-1)
     )
-    qxValues = q[..., 0][valid] * 1e-9  # m^-1 to nm^-1
-    qyValues = q[..., 1][valid] * 1e-9  # m^-1 to nm^-1
+    qxValues = Q[..., 0][valid] * 1e-9  # m^-1 to nm^-1
+    qyValues = Q[..., 1][valid] * 1e-9  # m^-1 to nm^-1
     intensityValues = image[valid]
 
     if intensityValues.size == 0:
