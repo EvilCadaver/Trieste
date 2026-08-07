@@ -142,9 +142,9 @@ def createQSpaceMap(
 
         # Crop coordinate grids with the same ROI instead of assuming that its
         # slices start at zero or have a step of one.
-        detectorRows, detectorColumns = np.indices(image.shape)
-        selectedColumns = detectorColumns[roiAllignMasks]
-        selectedRows = detectorRows[roiAllignMasks]
+        e_v, e_u = np.indices(image.shape)
+        selectedColumns = e_u[roiAllignMasks]
+        selectedRows = e_v[roiAllignMasks]
 
         if (
             selectedColumns.shape != intensity.shape
@@ -166,34 +166,43 @@ def createQSpaceMap(
     imageCCD = (image - levelBG)
     image = imageCCD * maskBeamStop
 
-    # Calculate the outgoing ray and scattering vector for every detector pixel.
+    # Detector pixels coordinates.
     height, width = image.shape
     v, u = np.indices((height, width))
+    du = (u - CX0) * PIXEL_SIZE
+    dv = (v - CY0) * PIXEL_SIZE
 
+    # Coordinates of the maximum of the scattered beam.
     R0 = np.array([ DCCD / np.cos(OMEGA) * np.cos(ALPHA),
                     0.0,
                     -DCCD / np.cos(OMEGA) * np.sin(ALPHA)])
-    BETA = OMEGA + ALPHA
-    detectorRows = np.array([0.0, 1.0, 0.0])
-    detectorColumns = np.array([-np.sin(BETA), 0.0, -np.cos(BETA)])
 
-    du = (u - CX0) * PIXEL_SIZE
-    dv = (v - CY0) * PIXEL_SIZE
-    detectorPosition = (
+    # Detector basis in sample's basis
+    BETA = OMEGA + ALPHA
+    e_v = np.array([0.0, 1.0, 0.0])
+    e_u = np.array([-np.sin(BETA), 0.0, -np.cos(BETA)])
+
+    # Pixel coordinates in sample's basis
+    R = (
         R0
-        + du[..., None] * detectorColumns
-        + dv[..., None] * detectorRows
+        + du[..., None] * e_u
+        + dv[..., None] * e_v
     )
 
-    scatteredDirection = detectorPosition / np.linalg.norm(
-        detectorPosition,
+    # Scattered ray coordinates in sample's basis
+    s_f = R / np.linalg.norm(
+        R,
         axis=-1,
         keepdims=True,
     )
-    incidentDirection = np.array(
+
+    # Incident ray coordinates in sample's basis
+    s_i = np.array(
         [np.cos(ALPHA), 0.0, np.sin(ALPHA)]
     )
-    q = 2 * np.pi / LAMBDA * (scatteredDirection - incidentDirection)
+
+    # Scattered ray coordinates in sample's reciprocal space
+    q = 2 * np.pi / LAMBDA * (s_f - s_i)
 
     # Flatten only usable, finite detector samples before histogramming them.
     valid = (
@@ -202,7 +211,7 @@ def createQSpaceMap(
         & np.all(np.isfinite(q[..., :2]), axis=-1)
     )
     qxValues = q[..., 0][valid] * 1e-9  # m^-1 to nm^-1
-    qyValues = q[..., 1][valid] * 1e-9
+    qyValues = q[..., 1][valid] * 1e-9  # m^-1 to nm^-1
     intensityValues = image[valid]
 
     if intensityValues.size == 0:
