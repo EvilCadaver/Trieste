@@ -47,6 +47,13 @@ def createQSpaceMap(
     intensity : numpy.ndarray
         Mean differential intensity with shape
         ``(len(qyCenters), len(qxCenters))``. Empty bins contain NaN.
+    delayScan : float
+        Pump-probe delay in ps.
+    imageCCD : numpy.ndarray
+        Background-offset-corrected detector image, or the cropped alignment
+        image in alignment mode.
+    levelBG : float
+        Median residual detector level measured in ``roiBG``.
     """
     
     print(f"Chosen scan index: {dataIndex}")
@@ -127,6 +134,8 @@ def createQSpaceMap(
 
     image = (imageDifferential / normScan - imageDifferentialNoProbe / normOnlyProbe)
 
+    levelBG = float(np.median(image[roiBG]))
+
     if alignMasks:
         # Preserve the detector-space diagnostic from analysis.py. The XOR
         # exposes roiBG even where it overlaps the beam-stop mask, which makes
@@ -158,11 +167,10 @@ def createQSpaceMap(
 
         qxCenters = selectedColumns[0, :]
         qyCenters = selectedRows[:, 0]
-        return qxCenters, qyCenters, intensity, delayScan, intensity
+        return qxCenters, qyCenters, intensity, delayScan, intensity, levelBG
 
     # Remove the residual offset using the same background ROI, then exclude
     # beam-stop pixels from all subsequent calculations.
-    levelBG = np.median(image[roiBG])
     imageCCD = (image - levelBG)
     image = imageCCD * maskBeamStop
 
@@ -267,7 +275,7 @@ def createQSpaceMap(
     # returned grid follows plotting convention: rows are Qy, columns are Qx.
     intensity = intensityQxQy.T
 
-    return qxCenters, qyCenters, intensity, delayScan, imageCCD
+    return qxCenters, qyCenters, intensity, delayScan, imageCCD, levelBG
 
 
 def createRadialIntensityProfile(
@@ -392,6 +400,11 @@ def subtractPolynomialBackground(
     background and corrected arrays retain the original profile shape, with
     NaN outside the selected interval. This makes the fitted range explicit and
     prevents polynomial extrapolation from entering the final analysis.
+
+    The final two return values are the fitted order and coefficients in the
+    ordinary ascending power basis. Thus coefficient ``i`` multiplies
+    ``distance**i``; the coefficients are not in the internally scaled domain
+    used by ``Polynomial.fit``.
     """
     distance = np.asarray(distance, dtype=float)
     intensity = np.asarray(intensity, dtype=float)
@@ -458,6 +471,11 @@ def subtractPolynomialBackground(
         intensity[fitMask],
         deg=BACKGROUND_NPOLY,
     )
+    # Convert from Polynomial.fit's scaled domain to the ordinary power basis,
+    # so exported coefficient i directly multiplies distance**i.
+    backgroundCoefficients = backgroundModel.convert().coef
+    polynomialOrder = int(backgroundModel.degree())
+
     background = np.full_like(intensity, np.nan)
     background[cutoffMask] = backgroundModel(distance[cutoffMask])
 
@@ -466,7 +484,15 @@ def subtractPolynomialBackground(
         intensity[cutoffMask] - background[cutoffMask]
     )
 
-    return cutoffMask, background, correctedIntensity, qLow, qHigh
+    return (
+        cutoffMask,
+        background,
+        correctedIntensity,
+        qLow,
+        qHigh,
+        polynomialOrder,
+        backgroundCoefficients,
+    )
 
 
 def _readDetectorImage(filePath, h5CCDImagePath):

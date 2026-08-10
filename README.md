@@ -159,12 +159,14 @@ frame-analysis scripts:
 
 - `createQSpaceMap()` reads a scan and its assigned backgrounds, normalizes and
   subtracts the backgrounds, applies detector masks, calculates scattering
-  vectors, and bins the corrected intensity onto a regular Qx/Qy grid.
+  vectors, bins the corrected intensity onto a regular Qx/Qy grid, and returns
+  the residual detector background level (`levelBG`).
 - `createRadialIntensityProfile()` integrates Q-space intensity into radial
   shells within the configured angular sector and its symmetry-equivalent
   directions.
 - `subtractPolynomialBackground()` applies radial cutoffs, fits a polynomial
-  background, and returns the background-subtracted profile.
+  background, and returns the background-subtracted profile together with the
+  fitted order and ordinary-power-basis coefficients.
 
 Q-space coordinates and radial distances are expressed in nm^-1. Empty bins
 remain `NaN` instead of being represented as zero intensity.
@@ -211,13 +213,20 @@ NaN. `"propagate delay"` assigns otherwise-unused duplicate batches to inferred
 missing delays in chronological order. If there are fewer duplicate batches
 than missing delays, it warns and falls back to `"keep first"`.
 
-The CSV contains a metadata header followed by:
+The CSV contains a metadata header followed by a per-delay background section
+and the data section:
 
 ```text
+***BACKGROUNDS***
+Physical data index,dt,levelBG,Polynomial order,Coefficient 0,...
 ***DATA***
 Q,dt,Intensity
 nm^-1,ps,a.u.
 ```
+
+The polynomial coefficients use ascending powers of Q: coefficient `i`
+multiplies `Q**i`. Inferred delays without an acquisition contain `nan`
+background values, consistent with their data columns.
 
 This CSV is the input expected by `analysisFourierTransform.py`.
 

@@ -80,7 +80,14 @@ if selectedDataFile in results["filesWithoutBackground"]:
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 
-qxCenters, qyCenters, intensityQxQy, delayScan, imageCCD = createQSpaceMap(
+(
+    qxCenters,
+    qyCenters,
+    intensityQxQy,
+    delayScan,
+    imageCCD,
+    levelBG,
+) = createQSpaceMap(
     results=results,
     h5CCDImagePath=h5CCDImagePath,
     h5DelayPath=h5DelayPath,

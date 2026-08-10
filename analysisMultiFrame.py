@@ -81,11 +81,38 @@ def saveQDelayData(
     delayValues,
     intensityValues,
     metadata,
+    backgroundDataIndexes,
+    levelBGValues,
+    polynomialOrders,
+    polynomialCoefficients,
 ):
-    """Save the plotted Q-delay matrix as a sorted long-form CSV table."""
+    """Save metadata, per-delay backgrounds, and sorted Q-delay data."""
     if intensityValues.shape != (qValues.size, delayValues.size):
         raise ValueError(
             "Intensity shape must equal (number of Q values, number of delays)"
+        )
+
+    backgroundDataIndexes = np.asarray(backgroundDataIndexes, dtype=float)
+    levelBGValues = np.asarray(levelBGValues, dtype=float)
+    polynomialOrders = np.asarray(polynomialOrders, dtype=float)
+    polynomialCoefficients = np.asarray(
+        polynomialCoefficients,
+        dtype=float,
+    )
+    for name, values in (
+        ("backgroundDataIndexes", backgroundDataIndexes),
+        ("levelBGValues", levelBGValues),
+        ("polynomialOrders", polynomialOrders),
+    ):
+        if values.shape != delayValues.shape:
+            raise ValueError(f"{name} must have one value per delay")
+    if (
+        polynomialCoefficients.ndim != 2
+        or polynomialCoefficients.shape[1] != delayValues.size
+    ):
+        raise ValueError(
+            "polynomialCoefficients must have shape "
+            "(number of coefficients, number of delays)"
         )
 
     qOrder = np.argsort(qValues, kind="stable")
@@ -104,6 +131,39 @@ def saveQDelayData(
 
         for name, value in metadata:
             writer.writerow([name, formatSetting(value)])
+
+        writer.writerow(["***BACKGROUNDS***"])
+        writer.writerow(
+            [
+                "Physical data index",
+                "dt",
+                "levelBG",
+                "Polynomial order",
+                *[
+                    f"Coefficient {power}"
+                    for power in range(polynomialCoefficients.shape[0])
+                ],
+            ]
+        )
+        for delayIndex in delayOrder:
+            dataIndex = backgroundDataIndexes[delayIndex]
+            polynomialOrder = polynomialOrders[delayIndex]
+            writer.writerow(
+                [
+                    "" if not np.isfinite(dataIndex) else str(int(dataIndex)),
+                    f"{delayValues[delayIndex]:.12g}",
+                    f"{levelBGValues[delayIndex]:.12g}",
+                    (
+                        ""
+                        if not np.isfinite(polynomialOrder)
+                        else str(int(polynomialOrder))
+                    ),
+                    *[
+                        f"{coefficient:.12g}"
+                        for coefficient in polynomialCoefficients[:, delayIndex]
+                    ],
+                ]
+            )
 
         writer.writerow(["***DATA***"])
         writer.writerow(["Q", "dt", "Intensity"])
@@ -255,6 +315,12 @@ for dataIndex, dataFilePath in enumerate(allDataFiles):
 distance = None
 profileDistance = None
 intensityProfiles = None
+levelBGValues = np.full(numberOfScans, np.nan)
+polynomialOrders = np.full(numberOfScans, np.nan)
+polynomialCoefficients = np.full(
+    (BACKGROUND_NPOLY + 1, numberOfScans),
+    np.nan,
+)
 qxReference = None
 qyReference = None
 
@@ -298,6 +364,7 @@ for dataIndex, dataFilePath in enumerate(allDataFiles):
                 intensityQxQy,
                 delayScan,
                 _,
+                levelBG,
             ) = createQSpaceMap(
                 results=results,
                 h5CCDImagePath=h5CCDImagePath,
@@ -334,6 +401,8 @@ for dataIndex, dataFilePath in enumerate(allDataFiles):
                 correctedIntensity,
                 qLow,
                 qHigh,
+                polynomialOrder,
+                currentPolynomialCoefficients,
             ) = subtractPolynomialBackground(
                 distance=currentDistance,
                 intensity=sumIntensity,
@@ -525,6 +594,9 @@ for dataIndex, dataFilePath in enumerate(allDataFiles):
                 )
 
         intensityProfiles[:, dataIndex] = correctedIntensity[cutoffMask]
+        levelBGValues[dataIndex] = levelBG
+        polynomialOrders[dataIndex] = polynomialOrder
+        polynomialCoefficients[:, dataIndex] = currentPolynomialCoefficients
 
     # Count physical batches, including skipped ones. The last condition forces
     # a final display refresh even when the scan count is not an exact multiple
@@ -745,6 +817,10 @@ match handlingDuplicateDelays:
         )
 
 figureIntensityProfiles = intensityProfiles[:, keptDataIndexes]
+figureBackgroundDataIndexes = keptDataIndexes.astype(float)
+figureLevelBGValues = levelBGValues[keptDataIndexes]
+figurePolynomialOrders = polynomialOrders[keptDataIndexes]
+figurePolynomialCoefficients = polynomialCoefficients[:, keptDataIndexes]
 
 duplicateFigures = []
 
@@ -835,9 +911,38 @@ if missingDelayValuesToInsert.size:
         (figureIntensityProfiles, missingProfiles),
         axis=1,
     )
+    missingBackgroundCount = missingDelayValuesToInsert.size
+    figureBackgroundDataIndexes = np.concatenate(
+        (
+            figureBackgroundDataIndexes,
+            np.full(missingBackgroundCount, np.nan),
+        )
+    )
+    figureLevelBGValues = np.concatenate(
+        (figureLevelBGValues, np.full(missingBackgroundCount, np.nan))
+    )
+    figurePolynomialOrders = np.concatenate(
+        (figurePolynomialOrders, np.full(missingBackgroundCount, np.nan))
+    )
+    figurePolynomialCoefficients = np.concatenate(
+        (
+            figurePolynomialCoefficients,
+            np.full(
+                (figurePolynomialCoefficients.shape[0], missingBackgroundCount),
+                np.nan,
+            ),
+        ),
+        axis=1,
+    )
     figureDelayOrder = np.argsort(figureDelays, kind="stable")
     figureDelays = figureDelays[figureDelayOrder]
     figureIntensityProfiles = figureIntensityProfiles[:, figureDelayOrder]
+    figureBackgroundDataIndexes = figureBackgroundDataIndexes[figureDelayOrder]
+    figureLevelBGValues = figureLevelBGValues[figureDelayOrder]
+    figurePolynomialOrders = figurePolynomialOrders[figureDelayOrder]
+    figurePolynomialCoefficients = figurePolynomialCoefficients[
+        :, figureDelayOrder
+    ]
 
 # Replace the live physical-index view with the final delay-coordinate figure.
 # This same deduplicated matrix is written below, so the CSV and figure agree.
@@ -967,6 +1072,10 @@ delimiter = saveQDelayData(
     delayValues=figureDelays,
     intensityValues=figureIntensityProfiles,
     metadata=metadata,
+    backgroundDataIndexes=figureBackgroundDataIndexes,
+    levelBGValues=figureLevelBGValues,
+    polynomialOrders=figurePolynomialOrders,
+    polynomialCoefficients=figurePolynomialCoefficients,
 )
 print(f"Saved Q-vs-delay data to {outputPath} (delimiter {delimiter!r})")
 # Matplotlib's savefig replaces an existing file at the same path.

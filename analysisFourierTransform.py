@@ -1,10 +1,11 @@
 """Fourier-analyse Q-versus-delay data exported by analysisMultiFrame.py.
 
-The input CSV contains a metadata header followed by a ``***DATA***`` marker
-and the columns Q, dt, and Intensity. For every Q value, this script fills
-missing time samples, removes the mean, applies a Hann window, and computes a
-real FFT along the delay axis. It writes the positive-frequency amplitudes to
-``<input stem>_Fourier.csv`` and saves the corresponding heatmap as PNG.
+The input CSV contains a metadata header, an optional ``***BACKGROUNDS***``
+section, and a ``***DATA***`` section with the columns Q, dt, and Intensity.
+For every Q value, this script fills missing time samples, removes the mean,
+applies a Hann window, and computes a real FFT along the delay axis. It writes
+the positive-frequency amplitudes to ``<input stem>_Fourier.csv`` and saves the
+corresponding heatmap as PNG.
 """
 
 import csv
@@ -14,8 +15,8 @@ from matplotlib.colors import TwoSlopeNorm
 from pathlib import Path
 
 # Input selection. Output files are created in the same directory as this CSV.
-folderData = r"./Output_DS/FeRh_A06"
-analysisName = r"FeRh_A06_Scan_027_Q_vs_delay_a0deg_d20deg_sym4.csv"
+folderData = r"./Output_DS/FeRh_A04"
+analysisName = r"FeRh_A04_Scan_050_Q_vs_delay_a45deg_d20deg_sym4.csv"
 fileData = Path(folderData) / analysisName
 
 if not fileData.exists():
@@ -29,12 +30,20 @@ with open(fileData, newline="", encoding="utf-8") as inputCSV:
     reader = csv.reader(inputCSV, dialect)
     input_metadata = {}
 
-    # Retain the header as key/value pairs until the data-section marker. Only
-    # the FFT-relevant subset is copied to the output later in the script.
+    # Retain only the metadata key/value pairs. Newer source files place a
+    # per-delay backgrounds section before the data; older files go directly
+    # from metadata to data.
+    readingBackgrounds = False
     for row in reader:
-        if row and row[0].strip() == "***DATA***":
+        if not row:
+            continue
+        sectionMarker = row[0].strip()
+        if sectionMarker == "***DATA***":
             break
-        if len(row) >= 2:
+        if sectionMarker == "***BACKGROUNDS***":
+            readingBackgrounds = True
+            continue
+        if not readingBackgrounds and len(row) >= 2:
             input_metadata[row[0].strip()] = row[1].strip()
     else:
         raise ValueError("The CSV file does not contain a ***DATA*** marker")
