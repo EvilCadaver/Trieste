@@ -1,5 +1,16 @@
 """Render a multi-frame Q-space scan as still images and/or videos."""
 
+# Premiere Pro compatibility solution
+# ffmpeg `
+#   -i "FeRh_A06_Scan_027_detector_pixels.mp4" `
+#   -c:v libx264 `
+#   -crf 18 `
+#   -preset medium `
+#   -pix_fmt yuv420p `
+#   -bf 0 `
+#   -g 1 `
+#   "FeRh_A06_Scan_027_detector_pixels_intra.mp4"
+
 from pathlib import Path
 
 import matplotlib.animation as mplAnimation
