@@ -11,6 +11,7 @@ from matplotlib.colors import (
     is_color_like,
 )
 from matplotlib.patches import Patch
+from matplotlib.ticker import MaxNLocator, ScalarFormatter
 import numpy as np
 
 from fileScan import scanFiles
@@ -27,17 +28,26 @@ def generateThreeColourMap(colours, name="three_colour_mix", samples=256):
     return LinearSegmentedColormap.from_list(name, colours, N=int(samples))
 
 
+class FixedDecimalScalarFormatter(ScalarFormatter):
+    """Scientific tick formatter with a configured number of decimals."""
+
+    def _set_format(self):
+        self._format = f"%.{COLOURBAR_TICK_DECIMAL_PLACES}f"
+        if self._usetex or self._useMathText:
+            self._format = rf"$\mathdefault{{{self._format}}}$"
+
+
 # -----------------------------------------------------------------------------
 # Animation and image output settings
 # -----------------------------------------------------------------------------
 # Enable either or both output styles.
-OUTPUT_IMAGES = True
+OUTPUT_IMAGES = False
 OUTPUT_VIDEOS = True
 
 # Formats are written without a leading dot. Multiple formats may be requested.
 IMAGE_FORMATS = ("png",)
 VIDEO_FORMATS = ("mp4",)
-FRAMES_PER_SECOND = 6
+FRAMES_PER_SECOND = 5
 IMAGE_DPI = 200
 
 # Output geometry. The axes retain equal Qx/Qy scaling inside this figure size.
@@ -49,13 +59,13 @@ AXES_ASPECT = "equal"
 # background-corrected differential detector image before Q-space rebinning;
 # detector row 0 is displayed at the top. Reciprocal space uses Qx/Qy in nm^-1.
 OUTPUT_DETECTOR_PIXEL_SPACE = True
-OUTPUT_RECIPROCAL_SPACE = False
+OUTPUT_RECIPROCAL_SPACE = True
 
 # Optionally mark the detector-space beam centre used by the geometry (CX0,
 # CY0). The cross has a fixed 1:1 physical size; 0.2 means 0.2 x 0.2 inches.
 # Its horizontal and vertical segments are always solid.
 BEAM_CENTRE_ON = True
-BEAM_CENTRE_COLOUR = "#00FF0D"
+BEAM_CENTRE_COLOUR = "#00FF0DBB"
 BEAM_CENTRE_LINE_WIDTH_POINTS = 1.0
 BEAM_CENTRE_SIZE_INCHES = 0.2
 
@@ -94,6 +104,8 @@ AXIS_TICK_FONT_SIZE = 10
 DELAY_INFO_FONT_SIZE = 11
 COLOURBAR_LABEL_FONT_SIZE = 12
 COLOURBAR_TICK_FONT_SIZE = 10
+COLOURBAR_TICK_DECIMAL_PLACES = 1
+COLOURBAR_MAX_TICKS = 6
 LEGEND_FONT_SIZE = 10
 
 # A heatmap does not normally need a legend because it has a colourbar. If a
@@ -139,7 +151,7 @@ VIDEO_WRITERS = {
 # Scan-specific settings
 # -----------------------------------------------------------------------------
 verbose = False
-from configs.FeRh_A04_S40_50 import (
+from configs.FeRh_A04_S68 import (
     folderData,
     sampleName,
     scanNames,
@@ -263,6 +275,23 @@ def validateOutputSettings():
             or value <= 0
         ):
             raise ValueError(f"{settingName} must be positive and finite")
+    if (
+        isinstance(COLOURBAR_TICK_DECIMAL_PLACES, (bool, np.bool_))
+        or not isinstance(
+            COLOURBAR_TICK_DECIMAL_PLACES,
+            (int, np.integer),
+        )
+        or COLOURBAR_TICK_DECIMAL_PLACES < 0
+    ):
+        raise ValueError(
+            "COLOURBAR_TICK_DECIMAL_PLACES must be a non-negative integer"
+        )
+    if (
+        isinstance(COLOURBAR_MAX_TICKS, (bool, np.bool_))
+        or not isinstance(COLOURBAR_MAX_TICKS, (int, np.integer))
+        or COLOURBAR_MAX_TICKS < 2
+    ):
+        raise ValueError("COLOURBAR_MAX_TICKS must be an integer of at least 2")
     if (
         not isinstance(DELAY_INFO_OFFSET_INCHES, (tuple, list))
         or len(DELAY_INFO_OFFSET_INCHES) != 2
@@ -479,12 +508,17 @@ def addBeamCentre(fig, ax):
 
 def moveColourbarExponentToLabel(colourbar):
     """Move the colourbar's scientific exponent into its label."""
+    # Restrict tick intervals to 1, 2, or 5 times a power of ten. This avoids
+    # quarter-step labels such as 0.25 while retaining per-frame colour limits.
+    colourbar.locator = MaxNLocator(
+        nbins=COLOURBAR_MAX_TICKS,
+        steps=[1, 2, 5, 10],
+        min_n_ticks=3,
+    )
+    colourbar.formatter = FixedDecimalScalarFormatter(useMathText=True)
     colourbar.update_ticks()
     formatter = colourbar.ax.yaxis.get_major_formatter()
-    if hasattr(formatter, "set_useMathText"):
-        formatter.set_useMathText(True)
-    if hasattr(formatter, "set_locs"):
-        formatter.set_locs(colourbar.get_ticks())
+    formatter.set_locs(colourbar.get_ticks())
     exponentText = formatter.get_offset()
 
     colourbar.set_label(
