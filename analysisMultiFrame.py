@@ -214,7 +214,7 @@ def readDelay(dataFilePath, h5DelayPath, delayZero):
 ## Scan specific settings
 # Verbose reporting on file scan results
 verbose = False
-from configs.FeRh_A04_S40_50 import (
+from configs.FeRh_A04_S68 import (
     folderData,
     sampleName,
     scanNames,
