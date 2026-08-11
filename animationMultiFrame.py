@@ -82,7 +82,7 @@ RECIPROCAL_X_AXIS_NAME = r"$Q_x$ (nm$^{-1}$)"
 RECIPROCAL_Y_AXIS_NAME = r"$Q_y$ (nm$^{-1}$)"
 DETECTOR_X_AXIS_NAME = "Detector column (pixels)"
 DETECTOR_Y_AXIS_NAME = "Detector row (pixels; origin at top)"
-GRAPH_TITLE = "{sampleName}, scan {scanNo}: differential intensity"
+GRAPH_TITLE = "{sampleName}, scan {scanNo}"
 COLOURBAR_NAME = "Mean differential intensity per bin"
 
 # Delay text is anchored inside the actual heatmap by distances in inches:
@@ -151,7 +151,7 @@ VIDEO_WRITERS = {
 # Scan-specific settings
 # -----------------------------------------------------------------------------
 verbose = False
-from configs.FeRh_A04_S68 import (
+from configs.FeRh_A06 import (
     folderData,
     sampleName,
     scanNames,

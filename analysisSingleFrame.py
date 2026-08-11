@@ -5,7 +5,7 @@ import numpy as np
 ## Scan specific settings
 # Verbose reporting on file scan results
 verbose = False
-from configs.FeRh_A04_S68 import (
+from configs.FeRh_A06 import (
     folderData,
     sampleName,
     scanNames,
