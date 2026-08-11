@@ -13,6 +13,7 @@ fileScan.py
         -> analysisSingleFrame.py
         -> analysisMultiFrame.py
             -> analysisFourierTransform.py
+        -> animationMultiFrame.py
 ```
 
 ## Requirements
@@ -22,10 +23,21 @@ fileScan.py
 - h5py
 - Matplotlib
 
+MP4 animation export additionally requires the FFmpeg command-line executable.
+FFmpeg is not a Python package and its `bin` directory must be available on
+`PATH`. GIF output uses Matplotlib's Pillow writer instead.
+
 Install the Python dependencies with:
 
 ```powershell
 python -m pip install numpy h5py matplotlib
+```
+
+Check MP4 writer availability with:
+
+```powershell
+ffmpeg -version
+python -c "import matplotlib.animation as a; print(a.writers.is_available('ffmpeg'))"
 ```
 
 ## Expected data layout
@@ -230,6 +242,85 @@ background values, consistent with their data columns.
 
 This CSV is the input expected by `analysisFourierTransform.py`.
 
+## Multi-frame images and animations
+
+`animationMultiFrame.py` applies the same scan discovery, background
+correction, detector geometry, masking, and Q-space projection as the analysis
+scripts, then exports every valid acquisition as still frames and/or an
+animation. Configure the constants near the beginning of the file and run:
+
+```powershell
+python animationMultiFrame.py
+```
+
+The output-style and format switches are:
+
+| Setting | Purpose |
+| --- | --- |
+| `OUTPUT_IMAGES` | Export a still image for every retained acquisition |
+| `OUTPUT_VIDEOS` | Export an animation containing all retained acquisitions |
+| `IMAGE_FORMATS` | Matplotlib image extensions, such as `("png",)` |
+| `VIDEO_FORMATS` | Animation extensions, such as `("mp4",)` or `("gif",)` |
+| `FRAMES_PER_SECOND` | Playback frame rate for saved animations |
+| `IMAGE_DPI` | Resolution used for still frames and animation rendering |
+
+Detector and reciprocal-space exports can be enabled independently:
+
+| Setting | Purpose |
+| --- | --- |
+| `OUTPUT_DETECTOR_PIXEL_SPACE` | Export the background-corrected differential detector image before Q-space rebinning |
+| `OUTPUT_RECIPROCAL_SPACE` | Export the rebinned Qx/Qy intensity map |
+
+The detector view uses detector columns and rows in pixels. Row zero is at the
+top and row values increase downward. Reciprocal-space axes are expressed in
+nm^-1. When both switches are enabled, each representation receives its own
+frame directory and animation file with `detector_pixels` or `Q_space` in its
+name.
+
+The detector view can optionally show the beam centre used by the geometry,
+`(CX0, CY0)`. The overlay is a fixed-square, solid-line cross controlled by:
+
+```python
+BEAM_CENTRE_ON = False
+BEAM_CENTRE_COLOUR = "lime"
+BEAM_CENTRE_LINE_WIDTH_POINTS = 1.0
+BEAM_CENTRE_SIZE_INCHES = 0.2
+```
+
+`BEAM_CENTRE_SIZE_INCHES` controls both dimensions, so `0.2` produces a
+0.2-by-0.2-inch cross without changing the detector limits or top-origin
+orientation.
+
+Plot appearance is controlled entirely through Matplotlib constants in the
+same settings block. These include:
+
+- Output aspect ratio and the centred heatmap area.
+- Axis names, graph title, legend visibility, and legend position.
+- Font family and separate sizes for titles, labels, ticks, delay text,
+  colorbar text, and the legend.
+- Delay-label offsets measured in inches from the heatmap's top-left corner.
+- Colorbar width and its distance in inches from the rendered heatmap.
+- A three-colour continuous colormap and independent negative/positive
+  percentile limits.
+- `ZERO_INTENSITY_IS_SECOND_COLOUR`, which can pin zero to the middle colour
+  even when the negative and positive limits have different magnitudes.
+- `COLOUR_LIMITS_ACROSS_ALL_FRAMES`, which selects a shared animation scale or
+  independent scaling for each frame.
+
+The scientific exponent is included in the colorbar label, separated from its
+title by a comma, rather than being drawn above the bar. The delay annotation
+and colorbar placement use physical distances so they remain consistent for
+narrow detector or reciprocal-space geometries.
+
+Outputs are written below:
+
+```text
+Output_DS/<sampleName>/Animations/
+```
+
+Excluded, broken, and background-less acquisitions are reported and omitted.
+No radial-integration angle overlays are drawn by this script.
+
 ## Fourier analysis
 
 `analysisFourierTransform.py` transforms every Q profile along the delay axis.
@@ -258,6 +349,8 @@ Two files are saved beside the input CSV:
 - `analysisSingleFrame.py` — interactive inspection of one acquisition.
 - `analysisMultiFrame.py` — complete delay-scan processing and Q-versus-delay
   export.
+- `animationMultiFrame.py` — Matplotlib still-frame and animation export in
+  detector-pixel and/or reciprocal space.
 - `analysisFourierTransform.py` — time-axis Fourier analysis and
   frequency-versus-Q export.
 
